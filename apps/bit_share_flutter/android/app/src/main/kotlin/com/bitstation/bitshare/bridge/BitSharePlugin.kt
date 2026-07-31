@@ -83,6 +83,7 @@ class BitSharePlugin :
                             result.error("inspection_failed", message, null)
                         }
                     },
+                    audioUrl = call.argument<String>("audioUrl"),
                 )
             }
             "startDownload" -> {
@@ -97,6 +98,7 @@ class BitSharePlugin :
                         mode = call.argument<String>("mode") ?: "video",
                         height = call.argument<Int>("height"),
                         estimatedSize = call.argument<Number>("estimatedBytes")?.toLong(),
+                        audioUrl = call.argument<String>("audioUrl"),
                     )
                     result.success(mapOf("taskId" to taskId))
                 } catch (error: IllegalArgumentException) {
@@ -321,12 +323,23 @@ class BitSharePlugin :
                 return true
             }
             RESOLVE_REQUEST_CODE -> {
-                val resolved = data?.getStringExtra(
-                    LoginSessionActivity.EXTRA_RESOLVED_URL,
-                )
-                pendingResolveResult?.success(
-                    resolved.takeIf { resultCode == Activity.RESULT_OK },
-                )
+                if (resultCode == Activity.RESULT_OK) {
+                    pendingResolveResult?.success(
+                        mapOf(
+                            "resolvedUrl" to data?.getStringExtra(
+                                LoginSessionActivity.EXTRA_RESOLVED_URL,
+                            ),
+                            "mediaUrl" to data?.getStringExtra(
+                                LoginSessionActivity.EXTRA_EXTRACTED_MEDIA_URL,
+                            ),
+                            "audioUrl" to data?.getStringExtra(
+                                LoginSessionActivity.EXTRA_EXTRACTED_AUDIO_URL,
+                            ),
+                        ),
+                    )
+                } else {
+                    pendingResolveResult?.success(null)
+                }
                 pendingResolveResult = null
                 return true
             }

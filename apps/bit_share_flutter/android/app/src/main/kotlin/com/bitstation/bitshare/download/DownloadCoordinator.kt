@@ -38,6 +38,7 @@ internal class DownloadCoordinator(
         rawUrl: String,
         onSuccess: (Map<String, Any?>) -> Unit,
         onError: (String) -> Unit,
+        audioUrl: String? = null,
     ) {
         val normalizedUrl = rawUrl.trim()
         val provider = ProviderRegistry.resolve(normalizedUrl)
@@ -61,6 +62,7 @@ internal class DownloadCoordinator(
                         appContext,
                         normalizedUrl,
                         cookiesPathFor(provider.id),
+                        audioUrl,
                     ),
                 )
                 val rawFormats = info.optJSONArray("formats")
@@ -165,6 +167,7 @@ internal class DownloadCoordinator(
         mode: String,
         height: Int?,
         estimatedSize: Long?,
+        audioUrl: String? = null,
     ): String {
         val normalizedUrl = rawUrl.trim()
         val provider = ProviderRegistry.resolve(normalizedUrl)
@@ -197,7 +200,15 @@ internal class DownloadCoordinator(
             ),
         )
         executor.execute {
-            runDownload(taskId, normalizedUrl, provider.id, provider.displayName, mode, height)
+            runDownload(
+                taskId,
+                normalizedUrl,
+                provider.id,
+                provider.displayName,
+                mode,
+                height,
+                audioUrl,
+            )
         }
         return taskId
     }
@@ -226,6 +237,7 @@ internal class DownloadCoordinator(
         providerName: String,
         mode: String,
         height: Int?,
+        audioUrl: String? = null,
     ) {
         val taskDir = File(appContext.cacheDir, "tasks/$taskId").apply {
             deleteRecursively()
@@ -295,6 +307,7 @@ internal class DownloadCoordinator(
                     }
                 },
                 cookiesPath = cookiesPathFor(providerId),
+                audioUrl = audioUrl,
             )
             if (isDebug) {
                 engineLog.appendText(

@@ -6,6 +6,17 @@ import 'bitshare_events.dart';
 
 enum DownloadMode { audio, video }
 
+class ShareLinkResolution {
+  const ShareLinkResolution({this.resolvedUrl, this.mediaUrl, this.audioUrl});
+
+  final String? resolvedUrl;
+  final String? mediaUrl;
+
+  /// Set only for a Facebook Story whose video and audio were captured as
+  /// two separate CDN URLs — see LoginSessionActivity's DASH-track capture.
+  final String? audioUrl;
+}
+
 class ResolutionOption {
   const ResolutionOption({
     required this.height,
@@ -100,10 +111,13 @@ class BitShareChannel implements SharePayloadRepository {
     }
   }
 
-  Future<MediaInspection> inspectUrl(String url) async {
+  /// [audioUrl], when set, is a second raw media URL to mux in as the audio
+  /// track — used only for Facebook Stories, whose video and audio are two
+  /// separate CDN resources (see ShareLinkResolution / resolveShareLink).
+  Future<MediaInspection> inspectUrl(String url, {String? audioUrl}) async {
     final response = await _methods.invokeMapMethod<Object?, Object?>(
       'inspectUrl',
-      {'url': url},
+      {'url': url, 'audioUrl': audioUrl},
     );
     if (response == null) {
       throw PlatformException(
@@ -119,6 +133,7 @@ class BitShareChannel implements SharePayloadRepository {
     required DownloadMode mode,
     int? height,
     int? estimatedBytes,
+    String? audioUrl,
   }) async {
     final response = await _methods.invokeMapMethod<Object?, Object?>(
       'startDownload',
@@ -127,6 +142,7 @@ class BitShareChannel implements SharePayloadRepository {
         'mode': mode.name,
         'height': height,
         'estimatedBytes': estimatedBytes,
+        'audioUrl': audioUrl,
       },
     );
     final taskId = response?['taskId'] as String?;
@@ -173,8 +189,22 @@ class BitShareChannel implements SharePayloadRepository {
   /// `/share/<id>/` links only resolve to their real content URL through a
   /// real browser engine. Returns null if resolution fails or times out, in
   /// which case callers should fall back to the original url.
-  Future<String?> resolveShareLink(String url) async {
-    return _methods.invokeMethod<String>('resolveShareLink', {'url': url});
+  ///
+  /// On a Facebook Story page specifically, [ShareLinkResolution.mediaUrl]
+  /// may also carry the raw video file the story player itself fetched —
+  /// yt-dlp cannot extract the story page, but that raw file downloads like
+  /// any other direct video URL once captured.
+  Future<ShareLinkResolution?> resolveShareLink(String url) async {
+    final raw = await _methods.invokeMapMethod<Object?, Object?>(
+      'resolveShareLink',
+      {'url': url},
+    );
+    if (raw == null) return null;
+    return ShareLinkResolution(
+      resolvedUrl: raw['resolvedUrl'] as String?,
+      mediaUrl: raw['mediaUrl'] as String?,
+      audioUrl: raw['audioUrl'] as String?,
+    );
   }
 
   Stream<BitShareEvent> watchEvents() {

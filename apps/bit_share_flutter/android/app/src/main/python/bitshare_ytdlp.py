@@ -4,6 +4,7 @@ import base64
 import json
 import os
 import re
+import subprocess
 from html.parser import HTMLParser
 from urllib.parse import parse_qs, urlparse
 
@@ -92,6 +93,189 @@ def _reraise_facebook_story(url, error):
     if _is_facebook_story_url(url) and "Unsupported URL" in str(error):
         return ValueError("BITSHARE_FACEBOOK_STORY_NOT_SUPPORTED")
     return error
+
+
+def _is_facebook_cdn_media_url(url):
+    # LoginSessionActivity's Story-mode network capture (see
+    # shouldInterceptRequest in LoginSessionActivity.kt) hands back the raw
+    # file the story player itself fetched, on fbcdn.net rather than
+    # facebook.com. That is just a direct progressive video URL — no
+    # extractor needed, the same way _resolve_public_threads_video's
+    # media_url is used directly below.
+    return _host_matches(urlparse(url).hostname, "fbcdn.net")
+
+
+def _facebook_story_height(url):
+    # Facebook's CDN encodes the actual encode height in the `efg` query
+    # parameter (same field _threads_progressive_height reads for Threads);
+    # unlike that call site there is no known original width/height here to
+    # scale a partial match against, so only the explicit "720p"-style tag
+    # is usable. A default placeholder covers the common case where `efg`
+    # is absent (the URL was matched by its `.mp4` extension instead) —
+    # DownloadCoordinator only shows this as a label, the actual file is
+    # whatever resolution the story player itself fetched regardless.
+    try:
+        encoded = parse_qs(urlparse(url).query)["efg"][0]
+        padding = "=" * (-len(encoded) % 4)
+        metadata = json.loads(base64.b64decode(encoded + padding))
+        tag = str(metadata.get("vencode_tag") or "")
+        explicit = re.search(r"(?:^|[_-])(\d{3,4})p(?:$|[_.-])", tag)
+        if explicit:
+            return int(explicit.group(1))
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+        pass
+    return 720
+
+
+def _facebook_cdn_content_length(url):
+    try:
+        probe = requests.head(
+            url,
+            impersonate="chrome",
+            headers={"Referer": "https://www.facebook.com/"},
+            timeout=30,
+        )
+        if probe.ok:
+            return _positive_number(
+                int(probe.headers.get("content-length") or 0)
+            )
+    except (TypeError, ValueError):
+        pass
+    return None
+
+
+def _probe_facebook_story_media(url, audio_url=None):
+    video_size = _facebook_cdn_content_length(url) or 0
+    audio_size = _facebook_cdn_content_length(audio_url) if audio_url else 0
+    total_size = _positive_number(video_size + (audio_size or 0))
+    return json.dumps(
+        {
+            "id": "facebook-story",
+            "title": "Historia de Facebook",
+            "formats": [
+                {
+                    "formatId": "facebook-story-progressive",
+                    "extension": "mp4",
+                    "audioCodec": "aac" if audio_url else "none",
+                    "videoCodec": "h264",
+                    "height": _facebook_story_height(url),
+                    "fileSize": total_size,
+                    "fileSizeApproximate": None,
+                    "audioBitrate": None,
+                    "totalBitrate": None,
+                }
+            ],
+        },
+        ensure_ascii=False,
+    )
+
+
+def _download_facebook_cdn_file(
+    url, dest_path, callback, progress_offset, progress_span
+):
+    # Deliberately not `with requests.get(...) as response:` — curl_cffi's
+    # response object is not guaranteed to support the context-manager
+    # protocol the way `requests` does; closing explicitly in `finally`
+    # works regardless of that.
+    response = requests.get(
+        url,
+        impersonate="chrome",
+        headers={"Referer": "https://www.facebook.com/"},
+        timeout=60,
+        stream=True,
+    )
+    try:
+        response.raise_for_status()
+        total = int(response.headers.get("content-length") or 0)
+        downloaded = 0
+        with open(dest_path, "wb") as handle:
+            for chunk in response.iter_content(chunk_size=262144):
+                if callback.isCancelled():
+                    raise DownloadCancelled("BITSHARE_CANCELLED")
+                if not chunk:
+                    continue
+                handle.write(chunk)
+                downloaded += len(chunk)
+                if total > 0:
+                    fraction = min(1.0, downloaded / total)
+                    callback.onProgressUpdate(
+                        progress_offset + fraction * progress_span, 0
+                    )
+    finally:
+        close = getattr(response, "close", None)
+        if callable(close):
+            close()
+
+
+def _run_ffmpeg(ffmpeg_location, args):
+    binary = os.path.join(ffmpeg_location, "ffmpeg")
+    result = subprocess.run(
+        [binary, "-y", *args],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            "BITSHARE_FFMPEG_MUX_FAILED: "
+            + result.stdout.decode("utf-8", errors="replace")[-2000:]
+        )
+
+
+def _download_facebook_story(
+    url,
+    audio_url,
+    output_template,
+    mode,
+    ffmpeg_location,
+    callback,
+):
+    directory = os.path.dirname(output_template)
+    os.makedirs(directory, exist_ok=True)
+    video_tmp = os.path.join(directory, "_fb_story_video.tmp")
+    audio_tmp = os.path.join(directory, "_fb_story_audio.tmp")
+    try:
+        video_span = 50.0 if audio_url else 100.0
+        _download_facebook_cdn_file(url, video_tmp, callback, 0.0, video_span)
+        if audio_url:
+            _download_facebook_cdn_file(
+                audio_url, audio_tmp, callback, video_span, 100.0 - video_span
+            )
+
+        if mode == "audio":
+            final_path = os.path.join(directory, "Facebook Story.m4a")
+            source = audio_tmp if audio_url else video_tmp
+            _run_ffmpeg(
+                ffmpeg_location,
+                ["-i", source, "-vn", "-c:a", "aac", final_path],
+            )
+        else:
+            final_path = os.path.join(directory, "Facebook Story.mp4")
+            if audio_url:
+                _run_ffmpeg(
+                    ffmpeg_location,
+                    [
+                        "-i", video_tmp,
+                        "-i", audio_tmp,
+                        "-c", "copy",
+                        "-movflags", "+faststart",
+                        final_path,
+                    ],
+                )
+            else:
+                _run_ffmpeg(
+                    ffmpeg_location,
+                    ["-i", video_tmp, "-c", "copy", final_path],
+                )
+        callback.onProgressUpdate(100.0, 0)
+        return 0
+    finally:
+        for tmp in (video_tmp, audio_tmp):
+            try:
+                if os.path.isfile(tmp):
+                    os.remove(tmp)
+            except OSError:
+                pass
 
 
 def _find_threads_media(value, shortcode):
@@ -233,9 +417,11 @@ def _resolve_public_threads_video(url, include_size):
     }
 
 
-def inspect_media(url, cookies_path=None):
+def inspect_media(url, cookies_path=None, audio_url=None):
     if _is_instagram_story_share(url):
         raise ValueError("BITSHARE_INSTAGRAM_STORY_REQUIRES_SESSION")
+    if _is_facebook_cdn_media_url(url):
+        return _probe_facebook_story_media(url, audio_url)
 
     threads_media = _resolve_public_threads_video(url, include_size=True)
     if threads_media:
@@ -308,10 +494,21 @@ def download_media(
     ffmpeg_library_path,
     callback,
     cookies_path=None,
+    audio_url=None,
 ):
     os.environ["LD_LIBRARY_PATH"] = ffmpeg_library_path
     if _is_instagram_story_share(url):
         raise ValueError("BITSHARE_INSTAGRAM_STORY_REQUIRES_SESSION")
+
+    if _is_facebook_cdn_media_url(url):
+        # No extractor involved at all: both tracks are already-resolved
+        # direct CDN files (see LoginSessionActivity's capture), so this
+        # downloads and muxes them directly instead of going through
+        # yt-dlp's extract/download pipeline, which has nothing to extract
+        # here in the first place.
+        return _download_facebook_story(
+            url, audio_url, output_template, mode, ffmpeg_location, callback
+        )
 
     threads_media = _resolve_public_threads_video(url, include_size=False)
     options = _base_options(cookies_path)

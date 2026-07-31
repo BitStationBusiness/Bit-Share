@@ -2,6 +2,7 @@ package com.bitstation.bitshare.auth
 
 import android.app.Activity
 import android.graphics.Color
+import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -10,6 +11,8 @@ import android.view.View
 import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Button
@@ -40,6 +43,14 @@ import java.io.File
  *   signed-in session carries over automatically, so a share link to a
  *   private post can resolve to the real (authenticated) content URL too.
  *
+ *   When the resolved URL is itself a Facebook Story viewer page, resolve
+ *   mode stays on it a little longer and watches outgoing requests for the
+ *   story's actual video file on fbcdn.net (see shouldInterceptRequest
+ *   below) — yt-dlp has no extractor for the Story *page*, but the raw CDN
+ *   URL the player itself fetches is just an ordinary progressive video
+ *   download once captured, the same trick bitshare_ytdlp.py already uses
+ *   for Threads.
+ *
  * Either way this mirrors the Windows client's "open your own browser, then
  * reuse that session" flow (see windows_download_backend_io.dart) as closely
  * as Android's sandboxing allows: an Android app cannot read another app's
@@ -55,6 +66,9 @@ class LoginSessionActivity : Activity() {
     private val handler = Handler(Looper.getMainLooper())
     private var lastSeenUrl: String? = null
     private var stableTicks = 0
+    private var capturedMediaUrl: String? = null
+    private var capturedAudioUrl: String? = null
+    private var lockedVideoId: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -168,6 +182,19 @@ class LoginSessionActivity : Activity() {
                 override fun onPageFinished(view: WebView, url: String?) {
                     if (resolving) scheduleStabilityCheck()
                 }
+
+                // Observation only — always returns null so the request
+                // proceeds exactly as the page intended. This just lets
+                // Bit-Share notice the requests that matter (the story's
+                // own video and audio track fetches) without acting as a
+                // proxy.
+                override fun shouldInterceptRequest(
+                    view: WebView,
+                    request: WebResourceRequest,
+                ): WebResourceResponse? {
+                    if (resolving) captureFacebookMediaRequest(request.url.toString())
+                    return null
+                }
             }
             webChromeClient = object : WebChromeClient() {
                 override fun onProgressChanged(view: WebView, newProgress: Int) {
@@ -203,6 +230,12 @@ class LoginSessionActivity : Activity() {
         // and Facebook's share-link redirect logic — behind a
         // desktop-looking UA on some paths.
         settings.userAgentString = DESKTOP_USER_AGENT
+        // WebView blocks JS-initiated <video>.play() without a user gesture
+        // by default. A Story page that can't autoplay never starts its
+        // real video fetch — it only ever loads a tiny poster/preview clip
+        // — so resolve mode (no user present to tap play) would otherwise
+        // capture the wrong, much smaller file every time.
+        settings.mediaPlaybackRequiresUserGesture = false
 
         val cookieManager = CookieManager.getInstance()
         cookieManager.setAcceptCookie(true)
@@ -211,7 +244,10 @@ class LoginSessionActivity : Activity() {
 
     /** Polls webView.url every 500ms; two consecutive identical reads means
      * the SPA's client-side routing has settled, not just that the initial
-     * HTTP response finished loading. */
+     * HTTP response finished loading. On a Story page specifically, the URL
+     * settling doesn't mean the player has fetched its video yet, so those
+     * keep polling a bit longer (bounded by STORY_EXTRA_TICKS, and by
+     * RESOLVE_TIMEOUT_MS as the hard ceiling either way). */
     private fun scheduleStabilityCheck() {
         handler.postDelayed(
             {
@@ -223,7 +259,11 @@ class LoginSessionActivity : Activity() {
                     stableTicks = 0
                     lastSeenUrl = current
                 }
-                if (stableTicks >= 2) {
+                val waitingForStoryMedia = isFacebookStoryUrl(current) &&
+                    (capturedMediaUrl == null || capturedAudioUrl == null)
+                val readyToFinish = stableTicks >= 2 &&
+                    (!waitingForStoryMedia || stableTicks >= STORY_EXTRA_TICKS)
+                if (readyToFinish) {
                     finishResolved()
                 } else {
                     scheduleStabilityCheck()
@@ -233,15 +273,73 @@ class LoginSessionActivity : Activity() {
         )
     }
 
+    private fun looksLikeFacebookVideoUrl(url: String): Boolean {
+        val host = Uri.parse(url).host?.lowercase() ?: return false
+        if (!host.endsWith("fbcdn.net")) return false
+        // `.mp4` alone, deliberately: poster/thumbnail requests on the same
+        // CDN also carry an `efg=` parameter, so that alone over-matched
+        // and picked up a ~100KB preview image instead of the real video.
+        return url.substringBefore('?').endsWith(".mp4")
+    }
+
+    /** Facebook serves the Story's video and audio as two separate DASH
+     * tracks, each fetched incrementally via `bytestart`/`byteend` query
+     * params against an otherwise-stable per-track URL (not a standard HTTP
+     * Range header — Facebook's own pseudo-range scheme). The `efg` param is
+     * a base64 JSON blob carrying `vencode_tag` (contains "audio" for the
+     * audio track) and `video_id`, which is used to ignore tracks belonging
+     * to a *different* story the tray preloads next while this one is still
+     * being captured. */
+    private fun captureFacebookMediaRequest(url: String) {
+        if (!looksLikeFacebookVideoUrl(url)) return
+        val uri = Uri.parse(url)
+        val efgRaw = uri.getQueryParameter("efg") ?: return
+        val efg = runCatching {
+            val decoded = android.util.Base64.decode(efgRaw, android.util.Base64.DEFAULT)
+            org.json.JSONObject(String(decoded, Charsets.UTF_8))
+        }.getOrNull() ?: return
+
+        val videoId = efg.optString("video_id").takeIf { it.isNotBlank() }
+        if (videoId != null) {
+            if (lockedVideoId == null) lockedVideoId = videoId
+            if (videoId != lockedVideoId) return
+        }
+
+        val fullResourceUrl = uri.buildUpon().clearQuery().apply {
+            for (name in uri.queryParameterNames) {
+                if (name == "bytestart" || name == "byteend") continue
+                for (value in uri.getQueryParameters(name)) {
+                    appendQueryParameter(name, value)
+                }
+            }
+        }.build().toString()
+
+        val tag = efg.optString("vencode_tag")
+        if (tag.contains("audio", ignoreCase = true)) {
+            capturedAudioUrl = fullResourceUrl
+        } else {
+            capturedMediaUrl = fullResourceUrl
+        }
+    }
+
+    private fun isFacebookStoryUrl(url: String?): Boolean {
+        if (url == null) return false
+        val uri = Uri.parse(url)
+        val host = uri.host?.lowercase() ?: return false
+        return (host == "facebook.com" || host.endsWith(".facebook.com")) &&
+            uri.path?.startsWith("/stories/") == true
+    }
+
     private fun finishResolved() {
         if (finished) return
         finished = true
         setResult(
             RESULT_OK,
-            android.content.Intent().putExtra(
-                EXTRA_RESOLVED_URL,
-                webView.url ?: lastSeenUrl,
-            ),
+            android.content.Intent().apply {
+                putExtra(EXTRA_RESOLVED_URL, webView.url ?: lastSeenUrl)
+                capturedMediaUrl?.let { putExtra(EXTRA_EXTRACTED_MEDIA_URL, it) }
+                capturedAudioUrl?.let { putExtra(EXTRA_EXTRACTED_AUDIO_URL, it) }
+            },
         )
         finish()
     }
@@ -302,8 +400,14 @@ class LoginSessionActivity : Activity() {
         const val EXTRA_COOKIE_URLS = "cookieUrls"
         const val EXTRA_RESOLVE_URL = "resolveUrl"
         const val EXTRA_RESOLVED_URL = "resolvedUrl"
+        const val EXTRA_EXTRACTED_MEDIA_URL = "extractedMediaUrl"
+        const val EXTRA_EXTRACTED_AUDIO_URL = "extractedAudioUrl"
         private const val STABILITY_POLL_MS = 500L
-        private const val RESOLVE_TIMEOUT_MS = 12_000L
+        // 2 ticks to settle the SPA route + up to 10 more (~5s) giving a
+        // Story page's video player time to actually issue its fbcdn.net
+        // request before giving up on finding one.
+        private const val STORY_EXTRA_TICKS = 12
+        private const val RESOLVE_TIMEOUT_MS = 16_000L
         private const val DESKTOP_USER_AGENT =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
                 "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"

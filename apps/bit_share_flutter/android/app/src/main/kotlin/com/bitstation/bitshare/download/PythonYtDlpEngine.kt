@@ -1,6 +1,7 @@
 package com.bitstation.bitshare.download
 
 import android.content.Context
+import com.chaquo.python.Kwarg
 import com.chaquo.python.Python
 import com.chaquo.python.android.AndroidPlatform
 
@@ -12,13 +13,19 @@ internal object PythonYtDlpEngine {
         }
     }
 
-    fun inspect(context: Context, url: String, cookiesPath: String? = null): String {
+    fun inspect(
+        context: Context,
+        url: String,
+        cookiesPath: String? = null,
+        audioUrl: String? = null,
+    ): String {
         initialize(context)
-        val result = if (cookiesPath != null) {
-            module().callAttr("inspect_media", url, cookiesPath)
-        } else {
-            module().callAttr("inspect_media", url)
-        }
+        val result = module().callAttr(
+            "inspect_media",
+            url,
+            Kwarg("cookies_path", cookiesPath),
+            Kwarg("audio_url", audioUrl),
+        )
         return result.toJava(String::class.java)
     }
 
@@ -32,32 +39,21 @@ internal object PythonYtDlpEngine {
         ffmpegLibraryPath: String,
         callback: DownloadCallback,
         cookiesPath: String? = null,
+        audioUrl: String? = null,
     ) {
         initialize(context)
-        val result = if (cookiesPath != null) {
-            module().callAttr(
-                "download_media",
-                url,
-                outputTemplate,
-                formatSelector,
-                mode,
-                ffmpegLocation,
-                ffmpegLibraryPath,
-                callback,
-                cookiesPath,
-            )
-        } else {
-            module().callAttr(
-                "download_media",
-                url,
-                outputTemplate,
-                formatSelector,
-                mode,
-                ffmpegLocation,
-                ffmpegLibraryPath,
-                callback,
-            )
-        }
+        val result = module().callAttr(
+            "download_media",
+            url,
+            outputTemplate,
+            formatSelector,
+            mode,
+            ffmpegLocation,
+            ffmpegLibraryPath,
+            callback,
+            Kwarg("cookies_path", cookiesPath),
+            Kwarg("audio_url", audioUrl),
+        )
         val exitCode = result.toJava(Int::class.java)
         check(exitCode == 0) {
             "El motor terminó con el código $exitCode."

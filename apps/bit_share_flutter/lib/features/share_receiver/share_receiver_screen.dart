@@ -40,6 +40,7 @@ class _ShareReceiverScreenState extends State<ShareReceiverScreen> {
   bool _donationDialogVisible = false;
   bool _loggingIn = false;
   String? _resolvedUrl;
+  String? _resolvedAudioUrl;
 
   @override
   void initState() {
@@ -509,7 +510,10 @@ class _ShareReceiverScreenState extends State<ShareReceiverScreen> {
     });
     try {
       final effectiveUrl = await _effectiveDownloadUrl() ?? url;
-      final inspection = await _channel.inspectUrl(effectiveUrl);
+      final inspection = await _channel.inspectUrl(
+        effectiveUrl,
+        audioUrl: _resolvedAudioUrl,
+      );
       if (!mounted) return;
       final defaultResolution = inspection.resolutions
           .where((item) => item.height <= 1080)
@@ -544,8 +548,11 @@ class _ShareReceiverScreenState extends State<ShareReceiverScreen> {
     if (url == null) return null;
     if (_resolvedUrl != null) return _resolvedUrl;
     if (!needsShareLinkResolution(url)) return url;
-    final resolved = await _channel.resolveShareLink(url);
-    _resolvedUrl = resolved ?? url;
+    final resolution = await _channel.resolveShareLink(url);
+    // A captured Story video URL downloads directly and is strictly more
+    // useful than the story *page* URL, which yt-dlp cannot extract at all.
+    _resolvedUrl = resolution?.mediaUrl ?? resolution?.resolvedUrl ?? url;
+    _resolvedAudioUrl = resolution?.audioUrl;
     return _resolvedUrl;
   }
 
@@ -557,6 +564,7 @@ class _ShareReceiverScreenState extends State<ShareReceiverScreen> {
       // The session just changed, so a URL resolved before logging in (e.g.
       // landing on a login wall) is stale — force it to be resolved again.
       _resolvedUrl = null;
+      _resolvedAudioUrl = null;
       if (_inspection == null) {
         await _inspectOptions();
       } else {
@@ -589,6 +597,7 @@ class _ShareReceiverScreenState extends State<ShareReceiverScreen> {
         mode: _mode,
         height: _mode == DownloadMode.video ? _selectedHeight : null,
         estimatedBytes: estimatedBytes,
+        audioUrl: _resolvedAudioUrl,
       );
       if (mounted) setState(() => _taskId ??= taskId);
     } on PlatformException catch (error) {
@@ -615,6 +624,7 @@ class _ShareReceiverScreenState extends State<ShareReceiverScreen> {
       _inspectionError = null;
       _mode = DownloadMode.video;
       _resolvedUrl = null;
+      _resolvedAudioUrl = null;
     }
   }
 
