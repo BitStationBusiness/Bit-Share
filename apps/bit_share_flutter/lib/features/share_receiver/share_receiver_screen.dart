@@ -7,6 +7,7 @@ import '../../core/web_url.dart' as web_url;
 import '../../domain/entities/share_payload.dart';
 import '../../platform/bitshare_channel.dart';
 import '../../platform/bitshare_events.dart';
+import 'provider_login.dart';
 
 String? extractWebUrl(String? sharedText) {
   return web_url.extractWebUrl(sharedText);
@@ -37,6 +38,8 @@ class _ShareReceiverScreenState extends State<ShareReceiverScreen> {
   String? _taskError;
   TaskCompletedEvent? _completedTask;
   bool _donationDialogVisible = false;
+  bool _loggingIn = false;
+  String? _resolvedUrl;
 
   @override
   void initState() {
@@ -273,14 +276,50 @@ class _ShareReceiverScreenState extends State<ShareReceiverScreen> {
               message: _inspectionError!,
               isError: true,
             ),
-            if (!_isPrivateInstagramSessionError) ...[
+            if (!_isUnsupportedContentError) ...[
               const SizedBox(height: 12),
-              OutlinedButton.icon(
-                key: const Key('retry-inspection-button'),
-                onPressed: _inspecting ? null : _inspectOptions,
-                icon: const Icon(Icons.refresh),
-                label: const Text('Reintentar'),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      key: const Key('retry-inspection-button'),
+                      onPressed: _inspecting ? null : _inspectOptions,
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('Reintentar'),
+                    ),
+                  ),
+                  if (_loginProvider != null) ...[
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: FilledButton.icon(
+                        key: const Key('login-button'),
+                        onPressed: (_inspecting || _loggingIn)
+                            ? null
+                            : () => unawaited(_login(_loginProvider!)),
+                        icon: _loggingIn
+                            ? const SizedBox.square(
+                                dimension: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(Icons.login_rounded),
+                        label: const Text('Iniciar sesión'),
+                      ),
+                    ),
+                  ],
+                ],
               ),
+              if (_loginProvider != null) ...[
+                const SizedBox(height: 8),
+                Text(
+                  'Bit-Share no recibe tu contraseña. La sesión se consulta '
+                  'localmente y solo después de tu autorización explícita.',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
             ],
           ] else if (_downloadUrl == null)
             const _CompactMessage(
@@ -307,6 +346,22 @@ class _ShareReceiverScreenState extends State<ShareReceiverScreen> {
             message: _taskError!,
             isError: true,
           ),
+          if (_loginProvider != null) ...[
+            const SizedBox(height: 4),
+            FilledButton.icon(
+              key: const Key('login-button-retry'),
+              onPressed: _loggingIn
+                  ? null
+                  : () => unawaited(_login(_loginProvider!)),
+              icon: _loggingIn
+                  ? const SizedBox.square(
+                      dimension: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.login_rounded),
+              label: const Text('Iniciar sesión y reintentar'),
+            ),
+          ],
         ],
       ],
     );
@@ -427,11 +482,22 @@ class _ShareReceiverScreenState extends State<ShareReceiverScreen> {
 
   String? get _downloadUrl => extractWebUrl(_payload?.text);
 
-  bool get _isPrivateInstagramSessionError =>
-      _inspectionError?.startsWith(
-        'Esta historia requiere la sesión privada de Instagram.',
-      ) ??
-      false;
+  String? get _loginProvider {
+    final url = _downloadUrl;
+    return url == null ? null : providerIdForLogin(url);
+  }
+
+  /// Content types the download engine can never extract regardless of
+  /// session — retrying or logging in would just repeat the same failure,
+  /// so both actions are hidden rather than offered dishonestly.
+  bool get _isUnsupportedContentError {
+    final message = _inspectionError;
+    if (message == null) return false;
+    return message.startsWith(
+          'Esta historia requiere la sesión privada de Instagram.',
+        ) ||
+        message.startsWith('Las historias de Facebook no se pueden');
+  }
 
   Future<void> _inspectOptions() async {
     final url = _downloadUrl;
@@ -442,7 +508,8 @@ class _ShareReceiverScreenState extends State<ShareReceiverScreen> {
       _taskError = null;
     });
     try {
-      final inspection = await _channel.inspectUrl(url);
+      final effectiveUrl = await _effectiveDownloadUrl() ?? url;
+      final inspection = await _channel.inspectUrl(effectiveUrl);
       if (!mounted) return;
       final defaultResolution = inspection.resolutions
           .where((item) => item.height <= 1080)
@@ -468,6 +535,38 @@ class _ShareReceiverScreenState extends State<ShareReceiverScreen> {
     }
   }
 
+  /// Resolves Facebook `/share/` links to their real content URL through
+  /// the in-app WebView before inspecting; every other URL passes through
+  /// unchanged. Cached in [_resolvedUrl] so the retry-after-login flow and
+  /// [_startDownload] reuse the same resolution instead of repeating it.
+  Future<String?> _effectiveDownloadUrl() async {
+    final url = _downloadUrl;
+    if (url == null) return null;
+    if (_resolvedUrl != null) return _resolvedUrl;
+    if (!needsShareLinkResolution(url)) return url;
+    final resolved = await _channel.resolveShareLink(url);
+    _resolvedUrl = resolved ?? url;
+    return _resolvedUrl;
+  }
+
+  Future<void> _login(String providerId) async {
+    setState(() => _loggingIn = true);
+    try {
+      final signedIn = await _channel.openLoginSession(providerId);
+      if (!mounted || !signedIn) return;
+      // The session just changed, so a URL resolved before logging in (e.g.
+      // landing on a login wall) is stale — force it to be resolved again.
+      _resolvedUrl = null;
+      if (_inspection == null) {
+        await _inspectOptions();
+      } else {
+        await _startDownload();
+      }
+    } finally {
+      if (mounted) setState(() => _loggingIn = false);
+    }
+  }
+
   Future<void> _startDownload() async {
     final url = _downloadUrl;
     final inspection = _inspection;
@@ -484,8 +583,9 @@ class _ShareReceiverScreenState extends State<ShareReceiverScreen> {
       _stage = 'initializing';
     });
     try {
+      final effectiveUrl = await _effectiveDownloadUrl() ?? url;
       final taskId = await _channel.startDownload(
-        url,
+        effectiveUrl,
         mode: _mode,
         height: _mode == DownloadMode.video ? _selectedHeight : null,
         estimatedBytes: estimatedBytes,
@@ -514,6 +614,7 @@ class _ShareReceiverScreenState extends State<ShareReceiverScreen> {
       _selectedHeight = null;
       _inspectionError = null;
       _mode = DownloadMode.video;
+      _resolvedUrl = null;
     }
   }
 

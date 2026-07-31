@@ -57,7 +57,11 @@ internal class DownloadCoordinator(
                     )
                 }
                 val info = JSONObject(
-                    PythonYtDlpEngine.inspect(appContext, normalizedUrl),
+                    PythonYtDlpEngine.inspect(
+                        appContext,
+                        normalizedUrl,
+                        cookiesPathFor(provider.id),
+                    ),
                 )
                 val rawFormats = info.optJSONArray("formats")
                 val formats = buildList {
@@ -193,7 +197,7 @@ internal class DownloadCoordinator(
             ),
         )
         executor.execute {
-            runDownload(taskId, normalizedUrl, provider.displayName, mode, height)
+            runDownload(taskId, normalizedUrl, provider.id, provider.displayName, mode, height)
         }
         return taskId
     }
@@ -218,6 +222,7 @@ internal class DownloadCoordinator(
     private fun runDownload(
         taskId: String,
         url: String,
+        providerId: String,
         providerName: String,
         mode: String,
         height: Int?,
@@ -289,6 +294,7 @@ internal class DownloadCoordinator(
                         return cancelledTasks.contains(taskId)
                     }
                 },
+                cookiesPath = cookiesPathFor(providerId),
             )
             if (isDebug) {
                 engineLog.appendText(
@@ -426,6 +432,14 @@ internal class DownloadCoordinator(
         return exact.takeIf { it > 0L } ?: approximate.takeIf { it > 0L } ?: 0L
     }
 
+    /** Set by LoginSessionActivity once the user explicitly signs in for
+     * this provider inside Bit-Share's own WebView (see the auth package).
+     * Absent by default — most providers never need it. */
+    private fun cookiesPathFor(providerId: String): String? {
+        val file = File(appContext.filesDir, "cookies/$providerId.txt")
+        return file.takeIf { it.isFile }?.absolutePath
+    }
+
     private fun availableStorageBytes(): Long {
         return StatFs(appContext.cacheDir.absolutePath).availableBytes
     }
@@ -448,6 +462,9 @@ internal class DownloadCoordinator(
                 "Esta historia requiere la sesión privada de Instagram. " +
                     "Bit-Share no copia cookies ni credenciales de otras " +
                     "aplicaciones."
+            "bitshare_facebook_story_not_supported" in message ->
+                "Las historias de Facebook no se pueden descargar: el motor " +
+                    "de descarga no las admite, sin importar la sesión."
             "bitshare_threads_public_video_not_found" in message ->
                 "La publicación de Threads no contiene un vídeo público."
             "bitshare_threads_post_not_found" in message ||
@@ -463,7 +480,8 @@ internal class DownloadCoordinator(
             "video unavailable" in message ->
                 "El vídeo ya no está disponible públicamente."
             "login" in message || "cookies" in message ->
-                "Este contenido necesita una sesión que Bit-Share no puede reutilizar."
+                "Este contenido necesita una sesión. Inicia sesión en Bit-Share " +
+                    "para continuar."
             "private" in message -> "El contenido no está disponible públicamente."
             "ssl" in message || "network" in message || "connection" in message ->
                 "La conexión segura se interrumpió. Inténtalo de nuevo."

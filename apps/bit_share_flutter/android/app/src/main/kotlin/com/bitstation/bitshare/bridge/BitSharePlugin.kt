@@ -8,6 +8,8 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import androidx.core.content.FileProvider
+import com.bitstation.bitshare.auth.LoginSessionActivity
+import com.bitstation.bitshare.auth.ProviderLogin
 import com.bitstation.bitshare.download.DownloadCoordinator
 import com.bitstation.bitshare.share.ShareIntentParser
 import io.flutter.embedding.engine.plugins.FlutterPlugin
@@ -24,7 +26,8 @@ class BitSharePlugin :
     MethodChannel.MethodCallHandler,
     EventChannel.StreamHandler,
     ActivityAware,
-    PluginRegistry.NewIntentListener {
+    PluginRegistry.NewIntentListener,
+    PluginRegistry.ActivityResultListener {
     private var methods: MethodChannel? = null
     private var events: EventChannel? = null
     private var eventSink: EventChannel.EventSink? = null
@@ -32,6 +35,8 @@ class BitSharePlugin :
     private var initialPayload: Map<String, Any?>? = null
     private var downloadCoordinator: DownloadCoordinator? = null
     private var appContext: Context? = null
+    private var pendingLoginResult: MethodChannel.Result? = null
+    private var pendingResolveResult: MethodChannel.Result? = null
     private val mainHandler = Handler(Looper.getMainLooper())
 
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
@@ -208,6 +213,62 @@ class BitSharePlugin :
                     )
                 }
             }
+            "openLoginSession" -> {
+                val activity = activityBinding?.activity
+                val providerId = call.argument<String>("providerId")
+                val target = providerId?.let(ProviderLogin::forProvider)
+                if (activity == null || providerId == null || target == null) {
+                    result.error(
+                        "unsupported_provider",
+                        "Este sitio no admite iniciar sesión desde Bit-Share.",
+                        null,
+                    )
+                    return
+                }
+                if (pendingLoginResult != null) {
+                    result.error(
+                        "login_in_progress",
+                        "Ya hay un inicio de sesión en curso.",
+                        null,
+                    )
+                    return
+                }
+                pendingLoginResult = result
+                activity.startActivityForResult(
+                    Intent(activity, LoginSessionActivity::class.java).apply {
+                        putExtra(LoginSessionActivity.EXTRA_PROVIDER_ID, providerId)
+                        putExtra(LoginSessionActivity.EXTRA_LOGIN_URL, target.loginUrl)
+                        putStringArrayListExtra(
+                            LoginSessionActivity.EXTRA_COOKIE_URLS,
+                            ArrayList(target.cookieUrls),
+                        )
+                    },
+                    LOGIN_REQUEST_CODE,
+                )
+            }
+            "resolveShareLink" -> {
+                val activity = activityBinding?.activity
+                val url = call.argument<String>("url")
+                if (activity == null || url.isNullOrBlank()) {
+                    result.error("invalid_url", "No se recibió un enlace.", null)
+                    return
+                }
+                if (pendingResolveResult != null) {
+                    result.error(
+                        "resolve_in_progress",
+                        "Ya hay una resolución de enlace en curso.",
+                        null,
+                    )
+                    return
+                }
+                pendingResolveResult = result
+                activity.startActivityForResult(
+                    Intent(activity, LoginSessionActivity::class.java).apply {
+                        putExtra(LoginSessionActivity.EXTRA_RESOLVE_URL, url)
+                    },
+                    RESOLVE_REQUEST_CODE,
+                )
+            }
             "retryDownload",
             "publishToMediaStore",
             "checkComponentUpdates",
@@ -231,6 +292,7 @@ class BitSharePlugin :
     override fun onAttachedToActivity(binding: ActivityPluginBinding) {
         activityBinding = binding
         binding.addOnNewIntentListener(this)
+        binding.addActivityResultListener(this)
         capture(binding.activity, binding.activity.intent, emit = false)
     }
 
@@ -251,6 +313,27 @@ class BitSharePlugin :
         return capture(activity, intent, emit = true)
     }
 
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
+        when (requestCode) {
+            LOGIN_REQUEST_CODE -> {
+                pendingLoginResult?.success(resultCode == Activity.RESULT_OK)
+                pendingLoginResult = null
+                return true
+            }
+            RESOLVE_REQUEST_CODE -> {
+                val resolved = data?.getStringExtra(
+                    LoginSessionActivity.EXTRA_RESOLVED_URL,
+                )
+                pendingResolveResult?.success(
+                    resolved.takeIf { resultCode == Activity.RESULT_OK },
+                )
+                pendingResolveResult = null
+                return true
+            }
+            else -> return false
+        }
+    }
+
     private fun capture(activity: Activity, intent: Intent?, emit: Boolean): Boolean {
         val payload = ShareIntentParser.parse(intent, activity.referrer?.host) ?: return false
         initialPayload = payload
@@ -262,7 +345,20 @@ class BitSharePlugin :
 
     private fun detachActivity() {
         activityBinding?.removeOnNewIntentListener(this)
+        activityBinding?.removeActivityResultListener(this)
         activityBinding = null
+        pendingLoginResult?.error(
+            "activity_unavailable",
+            "Se interrumpió el inicio de sesión.",
+            null,
+        )
+        pendingLoginResult = null
+        pendingResolveResult?.error(
+            "activity_unavailable",
+            "Se interrumpió la resolución del enlace.",
+            null,
+        )
+        pendingResolveResult = null
     }
 
     private fun coordinator(): DownloadCoordinator {
@@ -277,5 +373,7 @@ class BitSharePlugin :
         const val METHODS_CHANNEL = "bitshare/methods"
         const val EVENTS_CHANNEL = "bitshare/events"
         const val DONATION_URL = "https://ko-fi.com/bitstation"
+        const val LOGIN_REQUEST_CODE = 4210
+        const val RESOLVE_REQUEST_CODE = 4211
     }
 }

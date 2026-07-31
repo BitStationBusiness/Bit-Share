@@ -23,4 +23,13 @@
         <item name="android:backgroundDimEnabled">true</item>
         <item name="android:windowCloseOnTouchOutside">true</item>
     </style>
+    <!-- Hosts LoginSessionActivity's WebView: a solid, opaque window (unlike
+         the transparent share sheet) since the user reads and interacts with
+         a real site's login page here. -->
+    <style name="Theme.BitShare.Login" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:colorAccent">#9B7BFF</item>
+        <item name="android:windowBackground">#0E0C13</item>
+        <item name="android:navigationBarColor">#0E0C13</item>
+        <item name="android:statusBarColor">#0E0C13</item>
+    </style>
 </resources>

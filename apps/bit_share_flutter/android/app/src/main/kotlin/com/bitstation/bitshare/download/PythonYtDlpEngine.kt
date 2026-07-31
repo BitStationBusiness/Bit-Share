@@ -12,11 +12,14 @@ internal object PythonYtDlpEngine {
         }
     }
 
-    fun inspect(context: Context, url: String): String {
+    fun inspect(context: Context, url: String, cookiesPath: String? = null): String {
         initialize(context)
-        return module()
-            .callAttr("inspect_media", url)
-            .toJava(String::class.java)
+        val result = if (cookiesPath != null) {
+            module().callAttr("inspect_media", url, cookiesPath)
+        } else {
+            module().callAttr("inspect_media", url)
+        }
+        return result.toJava(String::class.java)
     }
 
     fun download(
@@ -28,10 +31,23 @@ internal object PythonYtDlpEngine {
         ffmpegLocation: String,
         ffmpegLibraryPath: String,
         callback: DownloadCallback,
+        cookiesPath: String? = null,
     ) {
         initialize(context)
-        val exitCode = module()
-            .callAttr(
+        val result = if (cookiesPath != null) {
+            module().callAttr(
+                "download_media",
+                url,
+                outputTemplate,
+                formatSelector,
+                mode,
+                ffmpegLocation,
+                ffmpegLibraryPath,
+                callback,
+                cookiesPath,
+            )
+        } else {
+            module().callAttr(
                 "download_media",
                 url,
                 outputTemplate,
@@ -41,7 +57,8 @@ internal object PythonYtDlpEngine {
                 ffmpegLibraryPath,
                 callback,
             )
-            .toJava(Int::class.java)
+        }
+        val exitCode = result.toJava(Int::class.java)
         check(exitCode == 0) {
             "El motor terminó con el código $exitCode."
         }

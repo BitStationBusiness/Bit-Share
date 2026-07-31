@@ -10,7 +10,7 @@ from urllib.parse import parse_qs, urlparse
 import yt_dlp
 from curl_cffi import requests
 from yt_dlp.networking.impersonate import ImpersonateTarget
-from yt_dlp.utils import DownloadCancelled
+from yt_dlp.utils import DownloadCancelled, DownloadError
 
 
 class _JsonScriptCollector(HTMLParser):
@@ -39,13 +39,19 @@ class _JsonScriptCollector(HTMLParser):
             self._in_script = False
 
 
-def _base_options():
-    return {
+def _base_options(cookies_path=None):
+    options = {
         "noplaylist": True,
         "quiet": True,
         "no_warnings": True,
         "impersonate": ImpersonateTarget.from_str("chrome"),
     }
+    # Only set when the user explicitly logged in through Bit-Share's own
+    # in-app browser (see LoginSessionActivity) — never copied from another
+    # app's session store.
+    if cookies_path and os.path.isfile(cookies_path):
+        options["cookiefile"] = cookies_path
+    return options
 
 
 def _positive_number(value):
@@ -65,6 +71,27 @@ def _is_instagram_story_share(url):
         _host_matches(parsed.hostname, "instagram.com")
         and parsed.path.startswith("/s/")
     )
+
+
+def _is_facebook_story_url(url):
+    # Facebook's `/stories/<id>/<token>/` path is shared by two different
+    # things: real 24h ephemeral Stories (which yt-dlp cannot extract at
+    # all) AND its full-screen swipeable viewer for Reels/videos (which
+    # yt-dlp usually *can* extract once resolved). The path alone cannot
+    # tell them apart, so it is only used to improve the error message
+    # after yt-dlp itself has already failed on the URL — see
+    # _reraise_facebook_story — never to block the attempt up front.
+    parsed = urlparse(url)
+    return (
+        _host_matches(parsed.hostname, "facebook.com")
+        and parsed.path.startswith("/stories/")
+    )
+
+
+def _reraise_facebook_story(url, error):
+    if _is_facebook_story_url(url) and "Unsupported URL" in str(error):
+        return ValueError("BITSHARE_FACEBOOK_STORY_NOT_SUPPORTED")
+    return error
 
 
 def _find_threads_media(value, shortcode):
@@ -206,7 +233,7 @@ def _resolve_public_threads_video(url, include_size):
     }
 
 
-def inspect_media(url):
+def inspect_media(url, cookies_path=None):
     if _is_instagram_story_share(url):
         raise ValueError("BITSHARE_INSTAGRAM_STORY_REQUIRES_SESSION")
 
@@ -235,11 +262,14 @@ def inspect_media(url):
             ensure_ascii=False,
         )
 
-    options = _base_options()
+    options = _base_options(cookies_path)
     options["skip_download"] = True
 
     with yt_dlp.YoutubeDL(options) as downloader:
-        info = downloader.extract_info(url, download=False)
+        try:
+            info = downloader.extract_info(url, download=False)
+        except DownloadError as error:
+            raise _reraise_facebook_story(url, error) from error
 
     formats = []
     for item in info.get("formats") or []:
@@ -277,13 +307,14 @@ def download_media(
     ffmpeg_location,
     ffmpeg_library_path,
     callback,
+    cookies_path=None,
 ):
     os.environ["LD_LIBRARY_PATH"] = ffmpeg_library_path
     if _is_instagram_story_share(url):
         raise ValueError("BITSHARE_INSTAGRAM_STORY_REQUIRES_SESSION")
 
     threads_media = _resolve_public_threads_video(url, include_size=False)
-    options = _base_options()
+    options = _base_options(cookies_path)
     options.update(
         {
             "format": "best" if threads_media else format_selector,
@@ -341,7 +372,10 @@ def download_media(
         target_url = (
             threads_media["media_url"] if threads_media else url
         )
-        return int(downloader.download([target_url]) or 0)
+        try:
+            return int(downloader.download([target_url]) or 0)
+        except DownloadError as error:
+            raise _reraise_facebook_story(target_url, error) from error
 
 
 def runtime_info():

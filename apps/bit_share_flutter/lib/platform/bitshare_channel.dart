@@ -157,6 +157,26 @@ class BitShareChannel implements SharePayloadRepository {
     return await _methods.invokeMethod<bool>('openDonationPage') ?? false;
   }
 
+  /// Opens the provider's own login page in an in-app WebView and, once the
+  /// user confirms they signed in, saves the resulting session cookies for
+  /// future downloads from that provider. Returns false if the user
+  /// cancelled without logging in.
+  Future<bool> openLoginSession(String providerId) async {
+    return await _methods.invokeMethod<bool>('openLoginSession', {
+          'providerId': providerId,
+        }) ??
+        false;
+  }
+
+  /// Loads [url] in the same in-app WebView used for login and returns
+  /// wherever it lands once client-side redirects settle — e.g. Facebook's
+  /// `/share/<id>/` links only resolve to their real content URL through a
+  /// real browser engine. Returns null if resolution fails or times out, in
+  /// which case callers should fall back to the original url.
+  Future<String?> resolveShareLink(String url) async {
+    return _methods.invokeMethod<String>('resolveShareLink', {'url': url});
+  }
+
   Stream<BitShareEvent> watchEvents() {
     return _events
         .receiveBroadcastStream()
