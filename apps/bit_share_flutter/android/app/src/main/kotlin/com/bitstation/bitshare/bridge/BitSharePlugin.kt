@@ -4,8 +4,10 @@ import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import androidx.core.content.FileProvider
 import com.bitstation.bitshare.download.DownloadCoordinator
 import com.bitstation.bitshare.share.ShareIntentParser
 import io.flutter.embedding.engine.plugins.FlutterPlugin
@@ -15,6 +17,7 @@ import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.PluginRegistry
+import java.io.File
 
 class BitSharePlugin :
     FlutterPlugin,
@@ -133,6 +136,74 @@ class BitSharePlugin :
                     result.error(
                         "browser_unavailable",
                         "No hay un navegador disponible.",
+                        null,
+                    )
+                }
+            }
+            "updateCacheDir" -> {
+                val context = appContext
+                if (context == null) {
+                    result.error("context_unavailable", "El motor no está listo.", null)
+                    return
+                }
+                val dir = File(context.cacheDir, "update")
+                dir.mkdirs()
+                result.success(dir.absolutePath)
+            }
+            "installApk" -> {
+                val activity = activityBinding?.activity
+                val path = call.argument<String>("path")
+                if (activity == null || path.isNullOrBlank()) {
+                    result.error(
+                        "activity_unavailable",
+                        "No se pudo iniciar la instalación.",
+                        null,
+                    )
+                    return
+                }
+                val apkFile = File(path)
+                if (!apkFile.exists()) {
+                    result.error("file_missing", "No se encontró el archivo descargado.", null)
+                    return
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+                    !activity.packageManager.canRequestPackageInstalls()
+                ) {
+                    try {
+                        activity.startActivity(
+                            Intent(
+                                android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                                Uri.parse("package:${activity.packageName}"),
+                            ),
+                        )
+                    } catch (_: Throwable) {
+                        // Fall through: the error below still tells the user what to do.
+                    }
+                    result.error(
+                        "install_permission_required",
+                        "Bit-Share necesita permiso para instalar apps desconocidas.",
+                        null,
+                    )
+                    return
+                }
+                try {
+                    val apkUri = FileProvider.getUriForFile(
+                        activity,
+                        "${activity.packageName}.fileprovider",
+                        apkFile,
+                    )
+                    activity.startActivity(
+                        Intent(Intent.ACTION_VIEW).apply {
+                            setDataAndType(apkUri, "application/vnd.android.package-archive")
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        },
+                    )
+                    result.success(true)
+                } catch (_: Throwable) {
+                    result.error(
+                        "installer_unavailable",
+                        "No se pudo abrir el instalador de Android.",
                         null,
                     )
                 }

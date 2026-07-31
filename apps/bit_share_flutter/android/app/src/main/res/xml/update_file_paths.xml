@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Exposes only context.cacheDir/update (see BitSharePlugin.updateCacheDir)
+     through the FileProvider used to hand the downloaded APK to the system
+     installer. Nothing else in the app's storage is reachable through it. -->
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <cache-path name="update" path="update/" />
+</paths>

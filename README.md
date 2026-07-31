@@ -86,6 +86,7 @@ repositorio mediante protección DPAPI de Windows.
 - [x] Selección de audio y resolución en Android y Windows.
 - [x] Cliente Windows con descarga local y sesión de navegador opcional.
 - [x] Instalador Windows 64-bit para \`C:\\Bit-Share\`.
+- [x] Actualización automática en Android y Windows desde GitHub Releases.
 - [ ] Mejoras de compatibilidad conforme evolucionen los sitios compatibles.
 - [ ] Experiencia Web con funciones que el navegador permita de forma nativa.
 

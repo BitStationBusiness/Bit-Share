@@ -44,9 +44,9 @@ class _WindowsDownloadScreenState extends State<WindowsDownloadScreen> {
       body: SafeArea(
         child: Center(
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 940),
+            constraints: const BoxConstraints(maxWidth: 760),
             child: ListView(
-              padding: const EdgeInsets.fromLTRB(32, 32, 32, 24),
+              padding: const EdgeInsets.fromLTRB(24, 20, 24, 16),
               children: [
                 Row(
                   children: [
@@ -57,30 +57,31 @@ class _WindowsDownloadScreenState extends State<WindowsDownloadScreen> {
                           begin: Alignment.topLeft,
                           end: Alignment.bottomRight,
                         ),
-                        borderRadius: BorderRadius.circular(18),
+                        borderRadius: BorderRadius.circular(11),
                       ),
                       child: const Padding(
-                        padding: EdgeInsets.all(14),
+                        padding: EdgeInsets.all(9),
                         child: Icon(
                           Icons.download_rounded,
-                          size: 28,
+                          size: 19,
                           color: Colors.white,
                         ),
                       ),
                     ),
-                    const SizedBox(width: 16),
+                    const SizedBox(width: 12),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
                             'Bit-Share',
-                            style: Theme.of(context).textTheme.headlineSmall
-                                ?.copyWith(fontWeight: FontWeight.w800),
+                            style: Theme.of(context).textTheme.titleLarge
+                                ?.copyWith(fontWeight: FontWeight.w700),
                           ),
                           Text(
                             'Descarga contenido compatible desde un enlace.',
                             style: TextStyle(
+                              fontSize: 12.5,
                               color: Theme.of(
                                 context,
                               ).colorScheme.onSurfaceVariant,
@@ -94,24 +95,24 @@ class _WindowsDownloadScreenState extends State<WindowsDownloadScreen> {
                           ? null
                           : () =>
                                 unawaited(widget.backend.openOutputDirectory()),
-                      icon: const Icon(Icons.folder_open_outlined),
+                      icon: const Icon(Icons.folder_open_outlined, size: 17),
                       label: const Text('Abrir descargas'),
                     ),
                   ],
                 ),
-                const SizedBox(height: 28),
+                const SizedBox(height: 18),
                 Card(
                   child: Padding(
-                    padding: const EdgeInsets.all(22),
+                    padding: const EdgeInsets.all(16),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         Text(
                           'Pega un enlace',
-                          style: Theme.of(context).textTheme.titleLarge
+                          style: Theme.of(context).textTheme.titleSmall
                               ?.copyWith(fontWeight: FontWeight.w700),
                         ),
-                        const SizedBox(height: 14),
+                        const SizedBox(height: 10),
                         Row(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
@@ -123,15 +124,24 @@ class _WindowsDownloadScreenState extends State<WindowsDownloadScreen> {
                                 keyboardType: TextInputType.url,
                                 textInputAction: TextInputAction.done,
                                 autocorrect: false,
+                                style: const TextStyle(fontSize: 13.5),
                                 decoration: InputDecoration(
+                                  isDense: true,
+                                  contentPadding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 10,
+                                  ),
                                   hintText: 'https://...',
-                                  prefixIcon: const Icon(Icons.link),
+                                  prefixIcon: const Icon(Icons.link, size: 18),
                                   suffixIcon: _urlController.text.isEmpty
                                       ? null
                                       : IconButton(
                                           tooltip: 'Limpiar',
                                           onPressed: _reset,
-                                          icon: const Icon(Icons.close),
+                                          icon: const Icon(
+                                            Icons.close,
+                                            size: 16,
+                                          ),
                                         ),
                                   border: const OutlineInputBorder(),
                                 ),
@@ -145,17 +155,20 @@ class _WindowsDownloadScreenState extends State<WindowsDownloadScreen> {
                                 onSubmitted: (_) => unawaited(_inspect()),
                               ),
                             ),
-                            const SizedBox(width: 12),
+                            const SizedBox(width: 8),
                             OutlinedButton.icon(
                               key: const Key('windows-paste-button'),
                               onPressed: _downloading ? null : _paste,
-                              icon: const Icon(Icons.content_paste_rounded),
+                              icon: const Icon(
+                                Icons.content_paste_rounded,
+                                size: 16,
+                              ),
                               label: const Text('Pegar'),
                               style: OutlinedButton.styleFrom(
-                                minimumSize: const Size(116, 56),
+                                minimumSize: const Size(88, 40),
                               ),
                             ),
-                            const SizedBox(width: 12),
+                            const SizedBox(width: 8),
                             FilledButton.icon(
                               key: const Key('windows-inspect-button'),
                               onPressed: _inspecting || _downloading
@@ -163,17 +176,17 @@ class _WindowsDownloadScreenState extends State<WindowsDownloadScreen> {
                                   : _inspect,
                               icon: _inspecting
                                   ? const SizedBox.square(
-                                      dimension: 18,
+                                      dimension: 14,
                                       child: CircularProgressIndicator(
                                         strokeWidth: 2,
                                       ),
                                     )
-                                  : const Icon(Icons.search_rounded),
+                                  : const Icon(Icons.search_rounded, size: 16),
                               label: Text(
                                 _inspecting ? 'Analizando…' : 'Analizar',
                               ),
                               style: FilledButton.styleFrom(
-                                minimumSize: const Size(140, 56),
+                                minimumSize: const Size(112, 40),
                               ),
                             ),
                           ],
@@ -183,7 +196,7 @@ class _WindowsDownloadScreenState extends State<WindowsDownloadScreen> {
                   ),
                 ),
                 if (_error != null) ...[
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 12),
                   _ErrorPanel(
                     message: _error!,
                     authenticationRequired: _authenticationRequired,
@@ -199,20 +212,20 @@ class _WindowsDownloadScreenState extends State<WindowsDownloadScreen> {
                   ),
                 ],
                 if (inspection != null) ...[
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 12),
                   _buildOptions(context, inspection),
                 ],
                 if (_downloading || _completedPath != null) ...[
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 12),
                   _buildTaskStatus(context),
                 ],
-                const SizedBox(height: 24),
+                const SizedBox(height: 20),
                 Text(
                   'powered by BitStation',
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     fontFamily: 'PressStart2P',
-                    fontSize: 8,
+                    fontSize: 7,
                     height: 1.5,
                     color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
@@ -246,7 +259,7 @@ class _WindowsDownloadScreenState extends State<WindowsDownloadScreen> {
 
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(22),
+        padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -256,26 +269,31 @@ class _WindowsDownloadScreenState extends State<WindowsDownloadScreen> {
               overflow: TextOverflow.ellipsis,
               style: Theme.of(
                 context,
-              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+              ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
             ),
-            const SizedBox(height: 4),
+            const SizedBox(height: 3),
             Text(
               inspection.providerName,
               style: TextStyle(
+                fontSize: 12.5,
                 color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 14),
             SegmentedButton<WindowsDownloadMode>(
+              style: const ButtonStyle(
+                visualDensity: VisualDensity.compact,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
               segments: const [
                 ButtonSegment(
                   value: WindowsDownloadMode.video,
-                  icon: Icon(Icons.movie_outlined),
+                  icon: Icon(Icons.movie_outlined, size: 16),
                   label: Text('Vídeo'),
                 ),
                 ButtonSegment(
                   value: WindowsDownloadMode.audio,
-                  icon: Icon(Icons.graphic_eq_rounded),
+                  icon: Icon(Icons.graphic_eq_rounded, size: 16),
                   label: Text('Solo audio'),
                 ),
               ],
@@ -294,23 +312,23 @@ class _WindowsDownloadScreenState extends State<WindowsDownloadScreen> {
               },
             ),
             if (_mode == WindowsDownloadMode.video) ...[
-              const SizedBox(height: 20),
+              const SizedBox(height: 14),
               Text(
                 'Resolución disponible',
                 style: Theme.of(
                   context,
-                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+                ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w700),
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 8),
               DecoratedBox(
                 decoration: BoxDecoration(
                   border: Border.all(
                     color: Theme.of(context).colorScheme.outlineVariant,
                   ),
-                  borderRadius: BorderRadius.circular(14),
+                  borderRadius: BorderRadius.circular(10),
                 ),
                 child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxHeight: 250),
+                  constraints: const BoxConstraints(maxHeight: 210),
                   child: ListView.separated(
                     shrinkWrap: true,
                     itemCount: inspection.resolutions.length,
@@ -322,20 +340,29 @@ class _WindowsDownloadScreenState extends State<WindowsDownloadScreen> {
                       final resolution = inspection.resolutions[index];
                       final selected = resolution.height == _selectedHeight;
                       return ListTile(
+                        dense: true,
+                        visualDensity: VisualDensity.compact,
                         key: Key('windows-resolution-${resolution.height}'),
                         selected: selected,
                         leading: Icon(
                           selected
                               ? Icons.radio_button_checked
                               : Icons.radio_button_off,
+                          size: 18,
                         ),
                         title: Text(
                           resolution.label,
-                          style: const TextStyle(fontWeight: FontWeight.w600),
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 13,
+                          ),
                         ),
                         trailing: resolution.estimatedBytes == null
                             ? null
-                            : Text(_formatBytes(resolution.estimatedBytes!)),
+                            : Text(
+                                _formatBytes(resolution.estimatedBytes!),
+                                style: const TextStyle(fontSize: 12.5),
+                              ),
                         onTap: _downloading
                             ? null
                             : () => setState(
@@ -347,40 +374,49 @@ class _WindowsDownloadScreenState extends State<WindowsDownloadScreen> {
                 ),
               ),
             ],
-            const SizedBox(height: 16),
+            const SizedBox(height: 12),
             Row(
               children: [
-                const Icon(Icons.save_outlined, size: 20),
-                const SizedBox(width: 8),
+                Icon(
+                  Icons.save_outlined,
+                  size: 16,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+                const SizedBox(width: 6),
                 Expanded(
                   child: Text(
                     estimatedBytes == null
                         ? 'Tamaño final por determinar'
                         : 'Tamaño estimado: ${_formatBytes(estimatedBytes)}',
+                    style: const TextStyle(fontSize: 12.5),
                   ),
                 ),
                 if (inspection.availableBytes > 0)
                   Text(
                     '${_formatBytes(inspection.availableBytes)} libres',
                     style: TextStyle(
+                      fontSize: 12.5,
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
                   ),
               ],
             ),
             if (!fitsStorage) ...[
-              const SizedBox(height: 10),
+              const SizedBox(height: 8),
               Text(
                 'No hay espacio suficiente para descargar y procesar '
                 'esta opción.',
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
+                style: TextStyle(
+                  fontSize: 12.5,
+                  color: Theme.of(context).colorScheme.error,
+                ),
               ),
             ],
-            const SizedBox(height: 18),
+            const SizedBox(height: 14),
             FilledButton.icon(
               key: const Key('windows-download-button'),
               onPressed: _downloading || !fitsStorage ? null : _download,
-              icon: const Icon(Icons.download_rounded),
+              icon: const Icon(Icons.download_rounded, size: 17),
               label: Text(
                 _mode == WindowsDownloadMode.audio
                     ? 'Descargar audio'
@@ -397,7 +433,7 @@ class _WindowsDownloadScreenState extends State<WindowsDownloadScreen> {
     final completedPath = _completedPath;
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(22),
+        padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -408,47 +444,54 @@ class _WindowsDownloadScreenState extends State<WindowsDownloadScreen> {
                     : 'Descargando… ${_progress.toStringAsFixed(0)}%',
                 style: Theme.of(
                   context,
-                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+                ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 10),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: LinearProgressIndicator(
+                  value: _progress <= 0 ? null : _progress / 100,
+                  minHeight: 5,
+                ),
               ),
               const SizedBox(height: 12),
-              LinearProgressIndicator(
-                value: _progress <= 0 ? null : _progress / 100,
-              ),
-              const SizedBox(height: 14),
               OutlinedButton.icon(
                 onPressed: _cancel,
-                icon: const Icon(Icons.stop_circle_outlined),
+                icon: const Icon(Icons.stop_circle_outlined, size: 16),
                 label: const Text('Cancelar'),
+                style: OutlinedButton.styleFrom(minimumSize: const Size(0, 40)),
               ),
             ] else if (completedPath != null) ...[
               Row(
                 children: [
                   Icon(
                     Icons.check_circle_outline,
+                    size: 20,
                     color: Theme.of(context).colorScheme.primary,
                   ),
-                  const SizedBox(width: 10),
+                  const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       'Descarga completada',
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
                         fontWeight: FontWeight.w700,
                       ),
                     ),
                   ),
                 ],
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 6),
               SelectableText(
                 completedPath,
                 style: TextStyle(
+                  fontSize: 12.5,
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
               ),
-              const SizedBox(height: 14),
+              const SizedBox(height: 12),
               FilledButton.icon(
                 onPressed: widget.backend.openOutputDirectory,
-                icon: const Icon(Icons.folder_open_outlined),
+                icon: const Icon(Icons.folder_open_outlined, size: 17),
                 label: const Text('Mostrar en Descargas'),
               ),
             ],
@@ -641,7 +684,7 @@ class _ErrorPanel extends StatelessWidget {
         context,
       ).colorScheme.errorContainer.withValues(alpha: 0.3),
       child: Padding(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -651,60 +694,64 @@ class _ErrorPanel extends StatelessWidget {
                   authenticationRequired
                       ? Icons.lock_outline
                       : Icons.error_outline,
+                  size: 19,
                   color: Theme.of(context).colorScheme.error,
                 ),
-                const SizedBox(width: 10),
-                Expanded(child: Text(message)),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(message, style: const TextStyle(fontSize: 13)),
+                ),
               ],
             ),
             if (authenticationRequired) ...[
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  Expanded(
-                    child: DropdownButtonFormField<WindowsBrowserSession>(
-                      initialValue: browserSession,
-                      decoration: const InputDecoration(
-                        labelText: 'Navegador donde iniciarás sesión',
-                        border: OutlineInputBorder(),
-                      ),
-                      items: WindowsBrowserSession.values
-                          .map(
-                            (item) => DropdownMenuItem(
-                              value: item,
-                              child: Text(item.label),
-                            ),
-                          )
-                          .toList(growable: false),
-                      onChanged: onBrowserChanged,
-                    ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<WindowsBrowserSession>(
+                initialValue: browserSession,
+                isDense: true,
+                decoration: const InputDecoration(
+                  isDense: true,
+                  contentPadding: EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
                   ),
-                  const SizedBox(width: 12),
+                  labelText: 'Navegador donde iniciarás sesión',
+                  border: OutlineInputBorder(),
+                ),
+                items: WindowsBrowserSession.values
+                    .map(
+                      (item) => DropdownMenuItem(
+                        value: item,
+                        child: Text(item.label),
+                      ),
+                    )
+                    .toList(growable: false),
+                onChanged: onBrowserChanged,
+              ),
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
                   OutlinedButton.icon(
                     onPressed: onOpenLogin,
-                    icon: const Icon(Icons.open_in_browser),
+                    icon: const Icon(Icons.open_in_browser, size: 16),
                     label: const Text('Abrir e iniciar sesión'),
-                    style: OutlinedButton.styleFrom(
-                      minimumSize: const Size(190, 56),
-                    ),
                   ),
-                  const SizedBox(width: 12),
                   FilledButton.icon(
                     key: const Key('windows-auth-retry-button'),
                     onPressed: onRetryAuthenticated,
-                    icon: const Icon(Icons.refresh),
+                    icon: const Icon(Icons.refresh, size: 16),
                     label: const Text('Reintentar con mi sesión'),
-                    style: FilledButton.styleFrom(
-                      minimumSize: const Size(210, 56),
-                    ),
                   ),
                 ],
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 8),
               Text(
                 'Bit-Share no recibe tu contraseña. La sesión se consulta '
                 'localmente y solo después de tu autorización explícita.',
-                style: Theme.of(context).textTheme.bodySmall,
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(fontSize: 11.5),
               ),
             ],
           ],
