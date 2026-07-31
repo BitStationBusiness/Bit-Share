@@ -121,6 +121,12 @@ class BitSharePlugin :
                         coordinator().share(activity, taskId),
                 )
             }
+            "openLibrary" -> {
+                val activity = activityBinding?.activity
+                result.success(
+                    activity != null && coordinator().openLibrary(activity),
+                )
+            }
             "openDonationPage" -> {
                 val activity = activityBinding?.activity
                 if (activity == null) {

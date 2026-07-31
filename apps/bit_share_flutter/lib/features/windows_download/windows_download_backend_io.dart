@@ -24,6 +24,118 @@ class WindowsProcessDownloadBackend implements WindowsDownloadBackend {
   Process? _activeProcess;
   _RuntimePaths? _runtimePaths;
 
+  String _sessionRoot() {
+    return _join(
+      Platform.environment['LOCALAPPDATA'] ?? Directory.current.path,
+      'Bit-Share',
+    );
+  }
+
+  /// Bit-Share signs in using a browser profile it owns rather than the
+  /// user's everyday one. Two reasons: Chromium holds an exclusive lock on
+  /// its cookie database while running, so reading the normal profile fails
+  /// outright unless the user quits their browser entirely; and this way
+  /// Bit-Share only ever touches a profile created for it, never the
+  /// user's own browsing data.
+  String _sessionProfilePath(WindowsBrowserSession browserSession) {
+    return _join(_sessionRoot(), 'browser-sessions', browserSession.name);
+  }
+
+  /// Where the browser profile's cookies get exported to, once. Reading the
+  /// profile directly needs the browser closed *every* time, so the export
+  /// is what actually makes a session reusable: later runs just read this
+  /// file and neither open nor close anything.
+  String _cookieFilePath(WindowsBrowserSession browserSession) {
+    return _join(_sessionRoot(), 'sessions', '${browserSession.name}.txt');
+  }
+
+  /// A session saved by an earlier run — including earlier launches of the
+  /// app, which is the whole point: signing in once should keep working
+  /// after Bit-Share is closed and reopened.
+  String? _storedCookieFile() {
+    for (final browserSession in WindowsBrowserSession.values) {
+      final file = File(_cookieFilePath(browserSession));
+      if (file.existsSync() && file.lengthSync() > 0) return file.path;
+    }
+    return null;
+  }
+
+  /// Chromium keeps an exclusive lock on the cookie database until its
+  /// *entire* process tree exits — the GPU, network, storage and renderer
+  /// helper processes all hold it open too, not just the window itself.
+  /// Killing every process individually races those helpers respawning, so
+  /// this finds the root browser process for Bit-Share's own profile (the
+  /// one launch flag reliably identifies: it has the profile directory but
+  /// no `--type=`, which only the root process lacks) and kills that whole
+  /// tree in one `taskkill /T`. A follow-up sweep catches anything that
+  /// still matches the profile path in case more than one root existed.
+  /// Only processes whose command line points at Bit-Share's own profile
+  /// directory are ever touched — the user's normal browser is never
+  /// affected, even when it is the same executable.
+  Future<void> _closeSessionBrowser(
+    WindowsBrowserSession browserSession,
+  ) async {
+    // `Start-Process -Wait` on taskkill.exe is unreliable here — it can
+    // return before the tree is actually gone — so taskkill is invoked
+    // directly and its own exit is what's waited on.
+    const script =
+        r'''
+$ErrorActionPreference = 'SilentlyContinue'
+$dir = $env:BITSHARE_SESSION_PROFILE
+$matched = Get-CimInstance Win32_Process |
+  Where-Object { $_.CommandLine -and $_.CommandLine.Contains($dir) }
+$roots = $matched | Where-Object { $_.CommandLine -notmatch '--type=' }
+foreach ($root in $roots) {
+  & taskkill.exe /PID $root.ProcessId /T /F | Out-Null
+}
+Start-Sleep -Milliseconds 300
+Get-CimInstance Win32_Process |
+  Where-Object { $_.CommandLine -and $_.CommandLine.Contains($dir) } |
+  ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+''';
+    await Process.run(
+      'powershell.exe',
+      ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script],
+      environment: {
+        ...Platform.environment,
+        'BITSHARE_SESSION_PROFILE': _sessionProfilePath(browserSession),
+      },
+      stdoutEncoding: utf8,
+      stderrEncoding: utf8,
+    );
+    // Chromium releases the database a moment after the tree exits.
+    await Future<void>.delayed(const Duration(milliseconds: 700));
+  }
+
+  /// Cookie arguments for a yt-dlp invocation.
+  ///
+  /// - [browserSession] given (the user just signed in and asked Bit-Share
+  ///   to use that session): closes the profile's browser window, then asks
+  ///   yt-dlp to read the live profile *and* dump what it finds into the
+  ///   persisted file in the same call — that dump is what makes the session
+  ///   outlive this run.
+  /// - [browserSession] omitted: reuses a persisted file from any earlier
+  ///   run, including previous launches of the app, with no browser
+  ///   involved at all. This is what lets a session signed in once keep
+  ///   working after Bit-Share is closed and reopened.
+  Future<List<String>> _cookieArguments(
+    WindowsBrowserSession? browserSession,
+  ) async {
+    if (browserSession != null) {
+      final file = _cookieFilePath(browserSession);
+      await Directory(File(file).parent.path).create(recursive: true);
+      await _closeSessionBrowser(browserSession);
+      return [
+        '--cookies-from-browser',
+        '${browserSession.ytDlpName}:${_sessionProfilePath(browserSession)}',
+        '--cookies',
+        file,
+      ];
+    }
+    final stored = _storedCookieFile();
+    return stored == null ? const [] : ['--cookies', stored];
+  }
+
   @override
   String get outputDirectory => _outputDirectory;
 
@@ -34,10 +146,12 @@ class WindowsProcessDownloadBackend implements WindowsDownloadBackend {
   }) async {
     final runtime = await _resolveRuntime();
     await Directory(_outputDirectory).create(recursive: true);
+    final cookieArguments = await _cookieArguments(browserSession);
     final result = await Process.run(
       runtime.ytDlp,
       [
-        ..._commonArguments(runtime, browserSession),
+        ..._commonArguments(runtime),
+        ...cookieArguments,
         '--dump-single-json',
         '--skip-download',
         url,
@@ -164,6 +278,7 @@ class WindowsProcessDownloadBackend implements WindowsDownloadBackend {
     final output = Directory(_outputDirectory);
     await output.create(recursive: true);
     await _ensureStorage(estimatedBytes, mode);
+    final cookieArguments = await _cookieArguments(browserSession);
 
     final format = mode == WindowsDownloadMode.audio
         ? null
@@ -175,7 +290,8 @@ class WindowsProcessDownloadBackend implements WindowsDownloadBackend {
       '%(title).180B [%(id)s].%(ext)s',
     );
     final arguments = <String>[
-      ..._commonArguments(runtime, browserSession),
+      ..._commonArguments(runtime),
+      ...cookieArguments,
       '--newline',
       '--progress',
       '--progress-template',
@@ -297,9 +413,37 @@ class WindowsProcessDownloadBackend implements WindowsDownloadBackend {
       throw const WindowsDownloadException('El enlace no es válido.');
     }
     final browser = await _findBrowser(browserSession);
-    await Process.start(browser, [
-      uri.toString(),
-    ], mode: ProcessStartMode.detached);
+    final profile = _sessionProfilePath(browserSession);
+    await Directory(profile).create(recursive: true);
+    await _closeSessionBrowser(browserSession);
+    await Process.start(
+      browser,
+      [
+        ..._sessionProfileArguments(browserSession, profile),
+        uri.toString(),
+      ],
+      mode: ProcessStartMode.detached,
+    );
+  }
+
+  List<String> _sessionProfileArguments(
+    WindowsBrowserSession browserSession,
+    String profile,
+  ) {
+    return switch (browserSession) {
+      WindowsBrowserSession.edge ||
+      WindowsBrowserSession.chrome => [
+        '--user-data-dir=$profile',
+        '--no-first-run',
+        '--no-default-browser-check',
+        // Without this, a Chromium profile signed into the OS account pulls
+        // the user's real bookmarks, passwords and extensions down into what
+        // is supposed to be a throwaway session directory — and pushes
+        // anything done here back up to that account.
+        '--disable-sync',
+      ],
+      WindowsBrowserSession.firefox => ['-profile', profile, '-no-remote'],
+    };
   }
 
   Future<String> _findBrowser(WindowsBrowserSession browserSession) async {
@@ -343,10 +487,7 @@ class WindowsProcessDownloadBackend implements WindowsDownloadBackend {
     );
   }
 
-  List<String> _commonArguments(
-    _RuntimePaths runtime,
-    WindowsBrowserSession? browserSession,
-  ) {
+  List<String> _commonArguments(_RuntimePaths runtime) {
     return [
       '--ignore-config',
       '--no-playlist',
@@ -363,10 +504,6 @@ class WindowsProcessDownloadBackend implements WindowsDownloadBackend {
         'deno:$deno',
         '--remote-components',
         'ejs:github',
-      ],
-      if (browserSession != null) ...[
-        '--cookies-from-browser',
-        browserSession.ytDlpName,
       ],
     ];
   }
@@ -512,6 +649,24 @@ class WindowsProcessDownloadBackend implements WindowsDownloadBackend {
 
   WindowsDownloadException _failureFor(String rawError) {
     final error = rawError.toLowerCase();
+    // Chromium keeps an exclusive lock on its cookie database, so this is
+    // what a still-running browser looks like. It used to fall through to
+    // the generic "could not download" message, which pointed the user at
+    // the link instead of at the real cause.
+    if (error.contains('could not copy') && error.contains('cookie')) {
+      return const WindowsDownloadException(
+        'El navegador de la sesión sigue abierto y bloquea sus cookies. '
+        'Ciérralo por completo y pulsa “Reintentar con mi sesión”.',
+        authenticationRequired: true,
+      );
+    }
+    if (error.contains('could not find') && error.contains('cookie')) {
+      return const WindowsDownloadException(
+        'Todavía no hay una sesión guardada. Pulsa “Abrir e iniciar sesión”, '
+        'inicia sesión en la ventana que abre Bit-Share y reintenta.',
+        authenticationRequired: true,
+      );
+    }
     if (_requiresAuthentication(error)) {
       return const WindowsDownloadException(
         'Este contenido necesita una sesión. Inicia sesión en tu navegador '

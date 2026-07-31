@@ -619,8 +619,9 @@ class _WindowsDownloadScreenState extends State<WindowsDownloadScreen> {
       if (mounted) {
         setState(() {
           _error =
-              'Inicia sesión en ${_browserSession.label}, cierra el navegador '
-              'si está bloqueando sus cookies y pulsa “Reintentar con mi sesión”.';
+              'Bit-Share abrió ${_browserSession.label} con una sesión propia. '
+              'Inicia sesión ahí y pulsa “Reintentar con mi sesión”. Tu '
+              'navegador habitual no se toca y no hace falta cerrarlo.';
         });
       }
     } on WindowsDownloadException catch (error) {

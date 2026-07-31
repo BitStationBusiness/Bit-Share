@@ -169,6 +169,12 @@ class BitShareChannel implements SharePayloadRepository {
         false;
   }
 
+  /// Opens the phone's own file/gallery viewer on the Bit-Share download
+  /// folder, so the user can browse and manage everything downloaded so far.
+  Future<bool> openLibrary() async {
+    return await _methods.invokeMethod<bool>('openLibrary') ?? false;
+  }
+
   Future<bool> openDonationPage() async {
     return await _methods.invokeMethod<bool>('openDonationPage') ?? false;
   }

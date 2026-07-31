@@ -223,11 +223,27 @@ class _ShareReceiverScreenState extends State<ShareReceiverScreen> {
             message: 'Descarga completada.',
           ),
           const SizedBox(height: 12),
-          FilledButton.icon(
-            key: const Key('share-result-button'),
-            onPressed: () => unawaited(_channel.shareResult(completed.taskId)),
-            icon: const Icon(Icons.share_outlined),
-            label: const Text('Compartir'),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  key: const Key('open-library-button'),
+                  onPressed: () => unawaited(_channel.openLibrary()),
+                  icon: const Icon(Icons.photo_library_outlined),
+                  label: const Text('Galería'),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: FilledButton.icon(
+                  key: const Key('share-result-button'),
+                  onPressed: () =>
+                      unawaited(_channel.shareResult(completed.taskId)),
+                  icon: const Icon(Icons.share_outlined),
+                  label: const Text('Compartir'),
+                ),
+              ),
+            ],
           ),
         ],
       );
@@ -509,11 +525,7 @@ class _ShareReceiverScreenState extends State<ShareReceiverScreen> {
       _taskError = null;
     });
     try {
-      final effectiveUrl = await _effectiveDownloadUrl() ?? url;
-      final inspection = await _channel.inspectUrl(
-        effectiveUrl,
-        audioUrl: _resolvedAudioUrl,
-      );
+      final inspection = await _inspectResolving(url);
       if (!mounted) return;
       final defaultResolution = inspection.resolutions
           .where((item) => item.height <= 1080)
@@ -536,6 +548,31 @@ class _ShareReceiverScreenState extends State<ShareReceiverScreen> {
       }
     } finally {
       if (mounted) setState(() => _inspecting = false);
+    }
+  }
+
+  /// Inspects [url], falling back to the WebView Story capture only if the
+  /// engine itself could not extract it. Instagram stories normally resolve
+  /// straight from the stored session — exactly and by id — so the capture,
+  /// which can only observe whichever tracks the player fetches, is kept as
+  /// a genuine last resort rather than the default path.
+  Future<MediaInspection> _inspectResolving(String url) async {
+    final effectiveUrl = await _effectiveDownloadUrl() ?? url;
+    try {
+      return await _channel.inspectUrl(
+        effectiveUrl,
+        audioUrl: _resolvedAudioUrl,
+      );
+    } on PlatformException {
+      if (_resolvedUrl != null || !canRecoverWithShareLinkResolution(url)) {
+        rethrow;
+      }
+      final resolution = await _channel.resolveShareLink(url);
+      final captured = resolution?.mediaUrl;
+      if (resolution == null || captured == null) rethrow;
+      _resolvedUrl = captured;
+      _resolvedAudioUrl = resolution.audioUrl;
+      return _channel.inspectUrl(captured, audioUrl: _resolvedAudioUrl);
     }
   }
 

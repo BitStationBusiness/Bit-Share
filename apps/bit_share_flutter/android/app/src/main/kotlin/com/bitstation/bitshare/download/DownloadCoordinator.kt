@@ -1,10 +1,14 @@
 package com.bitstation.bitshare.download
 
 import android.app.Activity
+import android.app.DownloadManager
+import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ApplicationInfo
+import android.os.Environment
 import android.os.StatFs
+import android.provider.DocumentsContract
 import android.system.Os
 import android.util.Log
 import com.bitstation.bitshare.donation.DonationPromptPolicy
@@ -217,6 +221,36 @@ internal class DownloadCoordinator(
         if (!activeTasks.contains(taskId)) return false
         cancelledTasks += taskId
         return true
+    }
+
+    /** Opens the phone's own file/gallery viewer on the Bit-Share download
+     * folder, so a finished download doubles as a shortcut for browsing and
+     * managing everything downloaded so far. Which app owns that folder
+     * varies a lot between vendors, so the candidates are tried in order and
+     * the first one something can handle wins. */
+    fun openLibrary(activity: Activity): Boolean {
+        val folderUri = DocumentsContract.buildDocumentUri(
+            EXTERNAL_STORAGE_AUTHORITY,
+            "primary:${Environment.DIRECTORY_DOWNLOADS}/$LIBRARY_FOLDER",
+        )
+        val candidates = listOf(
+            Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(folderUri, DocumentsContract.Document.MIME_TYPE_DIR)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            },
+            // Nothing claimed the folder itself: the system Downloads screen
+            // still lists the same files.
+            Intent(DownloadManager.ACTION_VIEW_DOWNLOADS),
+        )
+        for (intent in candidates) {
+            try {
+                activity.startActivity(intent)
+                return true
+            } catch (notFound: ActivityNotFoundException) {
+                continue
+            }
+        }
+        return false
     }
 
     fun share(activity: Activity, taskId: String): Boolean {
@@ -536,6 +570,10 @@ internal class DownloadCoordinator(
         const val PREFERENCES_NAME = "bitshare_preferences"
         const val COMPLETED_DOWNLOADS_KEY = "completed_downloads"
         const val STORAGE_SAFETY_BYTES = 16 * 1024 * 1024L
+
+        /** Must match MediaStoreRepository's RELATIVE_PATH subfolder. */
+        const val LIBRARY_FOLDER = "Bit-Share"
+        const val EXTERNAL_STORAGE_AUTHORITY = "com.android.externalstorage.documents"
     }
 
     private data class FormatInfo(
