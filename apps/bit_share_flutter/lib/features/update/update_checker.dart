@@ -62,6 +62,7 @@ class UpdateChecker {
 
       final asset = _pickAsset(latest);
       if (asset == null) return null;
+      final assetName = asset['name'] as String? ?? '';
 
       return UpdateRelease(
         version: version,
@@ -69,7 +70,7 @@ class UpdateChecker {
         notes: (latest['body'] as String? ?? '').trim(),
         downloadUrl: asset['browser_download_url'] as String,
         assetSizeBytes: (asset['size'] as num?)?.toInt() ?? 0,
-        sha256: _extractSha256(latest['body'] as String?),
+        sha256: _extractSha256(latest['body'] as String?, assetName),
       );
     } on Object {
       return null;
@@ -97,12 +98,19 @@ class UpdateChecker {
     );
   }
 
-  /// release notes may carry "SHA-256: `<hex>`" (a manual publishing habit,
-  /// not a hard requirement): when present it is enforced by UpdateInstaller,
-  /// when absent the size + file-signature checks still apply.
-  String? _extractSha256(String? notes) {
-    if (notes == null) return null;
-    final match = RegExp(r'\b([0-9a-fA-F]{64})\b').firstMatch(notes);
-    return match?.group(1)?.toLowerCase();
+  /// Release notes may carry a hash next to the asset's own file name (a
+  /// manual publishing habit, not a hard requirement) — e.g. from a
+  /// SHA256SUMS.txt pasted into the body. Matching is scoped to [assetName]
+  /// on purpose: a release ships both an .exe and an .apk, so grabbing the
+  /// first 64-hex sequence in the whole body would silently pin the wrong
+  /// platform's hash. When nothing matches, the size + file-signature checks
+  /// in UpdateInstaller still apply.
+  String? _extractSha256(String? notes, String assetName) {
+    if (notes == null || assetName.isEmpty) return null;
+    final pattern = RegExp(
+      '${RegExp.escape(assetName)}[^\\n]{0,80}?([0-9a-fA-F]{64})',
+      caseSensitive: false,
+    );
+    return pattern.firstMatch(notes)?.group(1)?.toLowerCase();
   }
 }

@@ -212,7 +212,7 @@ class _UpdateDialogState extends State<UpdateDialog> {
         .where(
           (line) =>
               line.isNotEmpty &&
-              !RegExp(r'^[0-9a-fA-F]{64}$').hasMatch(line) &&
+              !RegExp(r'[0-9a-fA-F]{64}').hasMatch(line) &&
               !RegExp(r'^sha-?256', caseSensitive: false).hasMatch(line),
         )
         .take(6)
