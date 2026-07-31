@@ -74,39 +74,51 @@ def _is_instagram_story_share(url):
     )
 
 
-def _is_facebook_story_url(url):
-    # Facebook's `/stories/<id>/<token>/` path is shared by two different
-    # things: real 24h ephemeral Stories (which yt-dlp cannot extract at
-    # all) AND its full-screen swipeable viewer for Reels/videos (which
-    # yt-dlp usually *can* extract once resolved). The path alone cannot
-    # tell them apart, so it is only used to improve the error message
-    # after yt-dlp itself has already failed on the URL — see
-    # _reraise_facebook_story — never to block the attempt up front.
+def _is_meta_story_url(url):
+    # Facebook's and Instagram's `/stories/...` path is shared by two
+    # different things: real 24h ephemeral Stories (which yt-dlp cannot
+    # extract at all) AND, on Facebook, its full-screen swipeable viewer for
+    # Reels/videos (which yt-dlp usually *can* extract once resolved). The
+    # path alone cannot tell them apart, so it is only used to improve the
+    # error message after yt-dlp itself has already failed on the URL — see
+    # _reraise_meta_story — never to block the attempt up front.
     parsed = urlparse(url)
     return (
         _host_matches(parsed.hostname, "facebook.com")
-        and parsed.path.startswith("/stories/")
-    )
+        or _host_matches(parsed.hostname, "instagram.com")
+    ) and parsed.path.startswith("/stories/")
 
 
-def _reraise_facebook_story(url, error):
-    if _is_facebook_story_url(url) and "Unsupported URL" in str(error):
-        return ValueError("BITSHARE_FACEBOOK_STORY_NOT_SUPPORTED")
+def _reraise_meta_story(url, error):
+    if _is_meta_story_url(url) and "Unsupported URL" in str(error):
+        return ValueError("BITSHARE_META_STORY_NOT_SUPPORTED")
     return error
 
 
-def _is_facebook_cdn_media_url(url):
+def _is_meta_cdn_media_url(url):
     # LoginSessionActivity's Story-mode network capture (see
     # shouldInterceptRequest in LoginSessionActivity.kt) hands back the raw
-    # file the story player itself fetched, on fbcdn.net rather than
-    # facebook.com. That is just a direct progressive video URL — no
-    # extractor needed, the same way _resolve_public_threads_video's
-    # media_url is used directly below.
-    return _host_matches(urlparse(url).hostname, "fbcdn.net")
+    # file the story player itself fetched, on fbcdn.net (Facebook) or
+    # cdninstagram.com (Instagram) rather than the page's own host. That is
+    # just a direct progressive video URL — no extractor needed, the same
+    # way _resolve_public_threads_video's media_url is used directly below.
+    hostname = urlparse(url).hostname
+    return _host_matches(hostname, "fbcdn.net") or _host_matches(
+        hostname, "cdninstagram.com"
+    )
 
 
-def _facebook_story_height(url):
-    # Facebook's CDN encodes the actual encode height in the `efg` query
+def _meta_referer(url):
+    # Instagram content is frequently served from the same fbcdn.net hosts
+    # as Facebook (cdninstagram.com is not a reliable signal either way), so
+    # the CDN host cannot be used to tell which page the request came from.
+    # A facebook.com Referer has worked for both in practice — Meta's CDN
+    # does not appear to validate it strictly per-property.
+    return "https://www.facebook.com/"
+
+
+def _meta_story_height(url):
+    # Meta's CDN encodes the actual encode height in the `efg` query
     # parameter (same field _threads_progressive_height reads for Threads);
     # unlike that call site there is no known original width/height here to
     # scale a partial match against, so only the explicit "720p"-style tag
@@ -127,12 +139,12 @@ def _facebook_story_height(url):
     return 720
 
 
-def _facebook_cdn_content_length(url):
+def _meta_cdn_content_length(url):
     try:
         probe = requests.head(
             url,
             impersonate="chrome",
-            headers={"Referer": "https://www.facebook.com/"},
+            headers={"Referer": _meta_referer(url)},
             timeout=30,
         )
         if probe.ok:
@@ -144,21 +156,21 @@ def _facebook_cdn_content_length(url):
     return None
 
 
-def _probe_facebook_story_media(url, audio_url=None):
-    video_size = _facebook_cdn_content_length(url) or 0
-    audio_size = _facebook_cdn_content_length(audio_url) if audio_url else 0
+def _probe_meta_story_media(url, audio_url=None):
+    video_size = _meta_cdn_content_length(url) or 0
+    audio_size = _meta_cdn_content_length(audio_url) if audio_url else 0
     total_size = _positive_number(video_size + (audio_size or 0))
     return json.dumps(
         {
-            "id": "facebook-story",
-            "title": "Historia de Facebook",
+            "id": "meta-story",
+            "title": "Historia",
             "formats": [
                 {
-                    "formatId": "facebook-story-progressive",
+                    "formatId": "meta-story-progressive",
                     "extension": "mp4",
                     "audioCodec": "aac" if audio_url else "none",
                     "videoCodec": "h264",
-                    "height": _facebook_story_height(url),
+                    "height": _meta_story_height(url),
                     "fileSize": total_size,
                     "fileSizeApproximate": None,
                     "audioBitrate": None,
@@ -170,7 +182,7 @@ def _probe_facebook_story_media(url, audio_url=None):
     )
 
 
-def _download_facebook_cdn_file(
+def _download_meta_cdn_file(
     url, dest_path, callback, progress_offset, progress_span
 ):
     # Deliberately not `with requests.get(...) as response:` — curl_cffi's
@@ -180,7 +192,7 @@ def _download_facebook_cdn_file(
     response = requests.get(
         url,
         impersonate="chrome",
-        headers={"Referer": "https://www.facebook.com/"},
+        headers={"Referer": _meta_referer(url)},
         timeout=60,
         stream=True,
     )
@@ -222,7 +234,7 @@ def _run_ffmpeg(ffmpeg_location, args):
         )
 
 
-def _download_facebook_story(
+def _download_meta_story(
     url,
     audio_url,
     output_template,
@@ -232,25 +244,25 @@ def _download_facebook_story(
 ):
     directory = os.path.dirname(output_template)
     os.makedirs(directory, exist_ok=True)
-    video_tmp = os.path.join(directory, "_fb_story_video.tmp")
-    audio_tmp = os.path.join(directory, "_fb_story_audio.tmp")
+    video_tmp = os.path.join(directory, "_meta_story_video.tmp")
+    audio_tmp = os.path.join(directory, "_meta_story_audio.tmp")
     try:
         video_span = 50.0 if audio_url else 100.0
-        _download_facebook_cdn_file(url, video_tmp, callback, 0.0, video_span)
+        _download_meta_cdn_file(url, video_tmp, callback, 0.0, video_span)
         if audio_url:
-            _download_facebook_cdn_file(
+            _download_meta_cdn_file(
                 audio_url, audio_tmp, callback, video_span, 100.0 - video_span
             )
 
         if mode == "audio":
-            final_path = os.path.join(directory, "Facebook Story.m4a")
+            final_path = os.path.join(directory, "Historia.m4a")
             source = audio_tmp if audio_url else video_tmp
             _run_ffmpeg(
                 ffmpeg_location,
                 ["-i", source, "-vn", "-c:a", "aac", final_path],
             )
         else:
-            final_path = os.path.join(directory, "Facebook Story.mp4")
+            final_path = os.path.join(directory, "Historia.mp4")
             if audio_url:
                 _run_ffmpeg(
                     ffmpeg_location,
@@ -420,8 +432,8 @@ def _resolve_public_threads_video(url, include_size):
 def inspect_media(url, cookies_path=None, audio_url=None):
     if _is_instagram_story_share(url):
         raise ValueError("BITSHARE_INSTAGRAM_STORY_REQUIRES_SESSION")
-    if _is_facebook_cdn_media_url(url):
-        return _probe_facebook_story_media(url, audio_url)
+    if _is_meta_cdn_media_url(url):
+        return _probe_meta_story_media(url, audio_url)
 
     threads_media = _resolve_public_threads_video(url, include_size=True)
     if threads_media:
@@ -455,7 +467,7 @@ def inspect_media(url, cookies_path=None, audio_url=None):
         try:
             info = downloader.extract_info(url, download=False)
         except DownloadError as error:
-            raise _reraise_facebook_story(url, error) from error
+            raise _reraise_meta_story(url, error) from error
 
     formats = []
     for item in info.get("formats") or []:
@@ -500,13 +512,13 @@ def download_media(
     if _is_instagram_story_share(url):
         raise ValueError("BITSHARE_INSTAGRAM_STORY_REQUIRES_SESSION")
 
-    if _is_facebook_cdn_media_url(url):
+    if _is_meta_cdn_media_url(url):
         # No extractor involved at all: both tracks are already-resolved
         # direct CDN files (see LoginSessionActivity's capture), so this
         # downloads and muxes them directly instead of going through
         # yt-dlp's extract/download pipeline, which has nothing to extract
         # here in the first place.
-        return _download_facebook_story(
+        return _download_meta_story(
             url, audio_url, output_template, mode, ffmpeg_location, callback
         )
 
@@ -572,7 +584,7 @@ def download_media(
         try:
             return int(downloader.download([target_url]) or 0)
         except DownloadError as error:
-            raise _reraise_facebook_story(target_url, error) from error
+            raise _reraise_meta_story(target_url, error) from error
 
 
 def runtime_info():

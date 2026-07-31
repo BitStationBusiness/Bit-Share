@@ -23,16 +23,28 @@ String? providerIdForLogin(String url) {
   return null;
 }
 
-/// Facebook's `/share/<id>/` short links only resolve to their real content
-/// URL (a `/watch`, `/videos/`, `/reel/` or `/stories/` URL) through a
-/// client-side redirect that yt-dlp's own HTTP client cannot reliably
-/// follow — Facebook resets the connection for it. Bit-Share resolves these
-/// through its own WebView first (see BitShareChannel.resolveShareLink)
-/// instead of handing the short link straight to yt-dlp.
+/// Two cases need the in-app WebView before yt-dlp ever sees the URL:
+///
+/// - Facebook's `/share/<id>/` short links only resolve to their real
+///   content URL (a `/watch`, `/videos/`, `/reel/` or `/stories/` URL)
+///   through a client-side redirect that yt-dlp's own HTTP client cannot
+///   reliably follow — Facebook resets the connection for it.
+/// - Facebook and Instagram `/stories/...` pages are never extractable by
+///   yt-dlp directly — their video (and, on Instagram, audio) only exist as
+///   CDN requests the WebView can observe while the story actually plays
+///   (see LoginSessionActivity's resolve mode).
+///
+/// Either way BitShareChannel.resolveShareLink does the work instead of
+/// handing the page URL straight to yt-dlp.
 bool needsShareLinkResolution(String url) {
   final uri = Uri.tryParse(url);
   final host = uri?.host.toLowerCase();
   if (host == null) return false;
   final isFacebook = host == 'facebook.com' || host.endsWith('.facebook.com');
-  return isFacebook && uri!.path.startsWith('/share/');
+  final isInstagram =
+      host == 'instagram.com' || host.endsWith('.instagram.com');
+  if (isFacebook && uri!.path.startsWith('/share/')) return true;
+  if (isFacebook && uri!.path.startsWith('/stories/')) return true;
+  if (isInstagram && uri!.path.startsWith('/stories/')) return true;
+  return false;
 }

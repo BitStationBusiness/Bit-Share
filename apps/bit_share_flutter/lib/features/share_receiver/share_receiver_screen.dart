@@ -497,7 +497,7 @@ class _ShareReceiverScreenState extends State<ShareReceiverScreen> {
     return message.startsWith(
           'Esta historia requiere la sesión privada de Instagram.',
         ) ||
-        message.startsWith('Las historias de Facebook no se pueden');
+        message.startsWith('Esta historia no se puede descargar');
   }
 
   Future<void> _inspectOptions() async {

@@ -43,13 +43,13 @@ import java.io.File
  *   signed-in session carries over automatically, so a share link to a
  *   private post can resolve to the real (authenticated) content URL too.
  *
- *   When the resolved URL is itself a Facebook Story viewer page, resolve
- *   mode stays on it a little longer and watches outgoing requests for the
- *   story's actual video file on fbcdn.net (see shouldInterceptRequest
- *   below) — yt-dlp has no extractor for the Story *page*, but the raw CDN
- *   URL the player itself fetches is just an ordinary progressive video
- *   download once captured, the same trick bitshare_ytdlp.py already uses
- *   for Threads.
+ *   When the resolved URL is itself a Facebook or Instagram Story viewer
+ *   page, resolve mode stays on it a little longer and watches outgoing
+ *   requests for the story's video and audio tracks on fbcdn.net /
+ *   cdninstagram.com (see shouldInterceptRequest below) — yt-dlp has no
+ *   extractor for the Story *page*, but those are just direct CDN files
+ *   once captured, the same trick bitshare_ytdlp.py already uses for
+ *   Threads.
  *
  * Either way this mirrors the Windows client's "open your own browser, then
  * reuse that session" flow (see windows_download_backend_io.dart) as closely
@@ -192,7 +192,7 @@ class LoginSessionActivity : Activity() {
                     view: WebView,
                     request: WebResourceRequest,
                 ): WebResourceResponse? {
-                    if (resolving) captureFacebookMediaRequest(request.url.toString())
+                    if (resolving) captureMetaMediaRequest(request.url.toString())
                     return null
                 }
             }
@@ -259,7 +259,7 @@ class LoginSessionActivity : Activity() {
                     stableTicks = 0
                     lastSeenUrl = current
                 }
-                val waitingForStoryMedia = isFacebookStoryUrl(current) &&
+                val waitingForStoryMedia = isMetaStoryUrl(current) &&
                     (capturedMediaUrl == null || capturedAudioUrl == null)
                 val readyToFinish = stableTicks >= 2 &&
                     (!waitingForStoryMedia || stableTicks >= STORY_EXTRA_TICKS)
@@ -273,25 +273,31 @@ class LoginSessionActivity : Activity() {
         )
     }
 
-    private fun looksLikeFacebookVideoUrl(url: String): Boolean {
+    /** fbcdn.net serves Facebook; cdninstagram.com serves Instagram — both
+     * are Meta's own CDN sharing the same DASH/`efg` delivery scheme, since
+     * Instagram and Threads media already resolve through fbcdn.net too
+     * (see _resolve_public_threads_video in bitshare_ytdlp.py). */
+    private fun looksLikeMetaVideoUrl(url: String): Boolean {
         val host = Uri.parse(url).host?.lowercase() ?: return false
-        if (!host.endsWith("fbcdn.net")) return false
+        if (!host.endsWith("fbcdn.net") && !host.endsWith("cdninstagram.com")) {
+            return false
+        }
         // `.mp4` alone, deliberately: poster/thumbnail requests on the same
         // CDN also carry an `efg=` parameter, so that alone over-matched
         // and picked up a ~100KB preview image instead of the real video.
         return url.substringBefore('?').endsWith(".mp4")
     }
 
-    /** Facebook serves the Story's video and audio as two separate DASH
-     * tracks, each fetched incrementally via `bytestart`/`byteend` query
-     * params against an otherwise-stable per-track URL (not a standard HTTP
-     * Range header — Facebook's own pseudo-range scheme). The `efg` param is
-     * a base64 JSON blob carrying `vencode_tag` (contains "audio" for the
-     * audio track) and `video_id`, which is used to ignore tracks belonging
-     * to a *different* story the tray preloads next while this one is still
-     * being captured. */
-    private fun captureFacebookMediaRequest(url: String) {
-        if (!looksLikeFacebookVideoUrl(url)) return
+    /** Facebook and Instagram serve a Story's video and audio as two
+     * separate DASH tracks, each fetched incrementally via
+     * `bytestart`/`byteend` query params against an otherwise-stable
+     * per-track URL (not a standard HTTP Range header — Meta's own
+     * pseudo-range scheme). The `efg` param is a base64 JSON blob carrying
+     * `vencode_tag` (contains "audio" for the audio track) and `video_id`,
+     * which is used to ignore tracks belonging to a *different* story the
+     * tray preloads next while this one is still being captured. */
+    private fun captureMetaMediaRequest(url: String) {
+        if (!looksLikeMetaVideoUrl(url)) return
         val uri = Uri.parse(url)
         val efgRaw = uri.getQueryParameter("efg") ?: return
         val efg = runCatching {
@@ -322,12 +328,13 @@ class LoginSessionActivity : Activity() {
         }
     }
 
-    private fun isFacebookStoryUrl(url: String?): Boolean {
+    private fun isMetaStoryUrl(url: String?): Boolean {
         if (url == null) return false
         val uri = Uri.parse(url)
         val host = uri.host?.lowercase() ?: return false
-        return (host == "facebook.com" || host.endsWith(".facebook.com")) &&
-            uri.path?.startsWith("/stories/") == true
+        val isMeta = host == "facebook.com" || host.endsWith(".facebook.com") ||
+            host == "instagram.com" || host.endsWith(".instagram.com")
+        return isMeta && uri.path?.startsWith("/stories/") == true
     }
 
     private fun finishResolved() {

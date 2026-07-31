@@ -475,9 +475,9 @@ internal class DownloadCoordinator(
                 "Esta historia requiere la sesión privada de Instagram. " +
                     "Bit-Share no copia cookies ni credenciales de otras " +
                     "aplicaciones."
-            "bitshare_facebook_story_not_supported" in message ->
-                "Las historias de Facebook no se pueden descargar: el motor " +
-                    "de descarga no las admite, sin importar la sesión."
+            "bitshare_meta_story_not_supported" in message ->
+                "Esta historia no se puede descargar: el motor de descarga " +
+                    "no la admite, sin importar la sesión."
             "bitshare_threads_public_video_not_found" in message ->
                 "La publicación de Threads no contiene un vídeo público."
             "bitshare_threads_post_not_found" in message ||
