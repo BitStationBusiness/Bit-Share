@@ -1,6 +1,8 @@
 package com.bitstation.bitshare.auth
 
 import android.app.Activity
+import android.content.ActivityNotFoundException
+import android.content.Intent
 import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
@@ -183,6 +185,24 @@ class LoginSessionActivity : Activity() {
                     if (resolving) scheduleStabilityCheck()
                 }
 
+                // Providers like Instagram deep-link into their own app via
+                // intent:// (or market://) mid-login. Without this override
+                // the WebView tries to load that URL itself and dies with
+                // ERR_UNKNOWN_URL_SCHEME, breaking the login page. Hand the
+                // deep link to Android; when nothing can open it (app not
+                // installed) follow the page's own browser_fallback_url, or
+                // just keep the current page.
+                override fun shouldOverrideUrlLoading(
+                    view: WebView,
+                    request: WebResourceRequest,
+                ): Boolean {
+                    val url = request.url.toString()
+                    if (url.startsWith("http://") || url.startsWith("https://")) {
+                        return false
+                    }
+                    return handleExternalUrl(url)
+                }
+
                 // Observation only — always returns null so the request
                 // proceeds exactly as the page intended. This just lets
                 // Bit-Share notice the requests that matter (the story's
@@ -219,6 +239,39 @@ class LoginSessionActivity : Activity() {
         }
 
         return root
+    }
+
+    /** Routes non-HTTP(S) navigations (intent://, market://, tel:, custom
+     * app schemes) out of the WebView. Always returns true: the WebView
+     * never loads these itself, so ERR_UNKNOWN_URL_SCHEME can never replace
+     * the login page. */
+    private fun handleExternalUrl(url: String): Boolean {
+        try {
+            val external = if (url.startsWith("intent://")) {
+                Intent.parseUri(url, Intent.URI_INTENT_SCHEME)
+            } else {
+                Intent(Intent.ACTION_VIEW, Uri.parse(url))
+            }
+            external.addCategory(Intent.CATEGORY_BROWSABLE)
+            external.component = null
+            external.selector = null
+            try {
+                startActivity(external)
+            } catch (notFound: ActivityNotFoundException) {
+                // The provider's app is not installed: use the page's own
+                // web fallback when it declared one, otherwise stay put.
+                val fallback = external.getStringExtra("browser_fallback_url")
+                if (!fallback.isNullOrBlank() &&
+                    (fallback.startsWith("http://") || fallback.startsWith("https://"))
+                ) {
+                    webView.loadUrl(fallback)
+                }
+            }
+        } catch (parseFailure: Exception) {
+            // Unparseable scheme: swallow — keeping the current page is
+            // always better than an error screen.
+        }
+        return true
     }
 
     private fun configureWebView() {
@@ -288,14 +341,29 @@ class LoginSessionActivity : Activity() {
         return url.substringBefore('?').endsWith(".mp4")
     }
 
+    /** `JSONObject.optString` stringifies a JSON `null` value as the
+     * literal text "null" instead of returning Kotlin null, which silently
+     * turns an absent field into a fake, universally-matching id. This
+     * treats both a missing key and an explicit JSON null as "no id". */
+    private fun jsonStringOrNull(json: org.json.JSONObject, key: String): String? {
+        if (json.isNull(key)) return null
+        return json.optString(key).takeIf { it.isNotBlank() }
+    }
+
     /** Facebook and Instagram serve a Story's video and audio as two
      * separate DASH tracks, each fetched incrementally via
      * `bytestart`/`byteend` query params against an otherwise-stable
      * per-track URL (not a standard HTTP Range header — Meta's own
      * pseudo-range scheme). The `efg` param is a base64 JSON blob carrying
-     * `vencode_tag` (contains "audio" for the audio track) and `video_id`,
-     * which is used to ignore tracks belonging to a *different* story the
-     * tray preloads next while this one is still being captured. */
+     * `vencode_tag` (contains "audio" for the audio track) plus an asset
+     * identifier, which is used to ignore tracks belonging to a *different*
+     * story the tray preloads next while this one is still being captured.
+     * Facebook populates `video_id` for that; Instagram leaves `video_id`
+     * as JSON null (org.json's optString stringifies that as the literal
+     * text "null", which used to defeat the lock — every request "matched"
+     * and the last-preloaded story silently won), so `xpv_asset_id` — which
+     * Instagram does populate with a real, distinct-per-asset value — is
+     * used as a fallback. */
     private fun captureMetaMediaRequest(url: String) {
         if (!looksLikeMetaVideoUrl(url)) return
         val uri = Uri.parse(url)
@@ -305,10 +373,10 @@ class LoginSessionActivity : Activity() {
             org.json.JSONObject(String(decoded, Charsets.UTF_8))
         }.getOrNull() ?: return
 
-        val videoId = efg.optString("video_id").takeIf { it.isNotBlank() }
-        if (videoId != null) {
-            if (lockedVideoId == null) lockedVideoId = videoId
-            if (videoId != lockedVideoId) return
+        val assetId = jsonStringOrNull(efg, "video_id") ?: jsonStringOrNull(efg, "xpv_asset_id")
+        if (assetId != null) {
+            if (lockedVideoId == null) lockedVideoId = assetId
+            if (assetId != lockedVideoId) return
         }
 
         val fullResourceUrl = uri.buildUpon().clearQuery().apply {

@@ -40,23 +40,33 @@ android {
         }
     }
 
+    // Credentials are read lazily and only enforced when a release variant is
+    // actually assembled — this block runs during Gradle's *configuration*
+    // phase for every variant (including assembleDebug), so eagerly throwing
+    // here used to fail every debug build too whenever the signing env vars
+    // weren't set.
+    val storeFilePath = releaseProperties.getProperty("storeFile")
+    val storePassword = System.getenv("BITSHARE_STORE_PASSWORD")
+    val keyPassword = System.getenv("BITSHARE_KEY_PASSWORD")
+    val canSignRelease = storeFilePath != null && storePassword != null && keyPassword != null
+
     signingConfigs {
-        create("release") {
-            val storeFilePath = releaseProperties.getProperty("storeFile")
-                ?: throw GradleException("Falta android/key.properties para firmar el release.")
-            storeFile = file(storeFilePath)
-            keyAlias = releaseProperties.getProperty("keyAlias")
-                ?: throw GradleException("Falta keyAlias en android/key.properties.")
-            storePassword = System.getenv("BITSHARE_STORE_PASSWORD")
-                ?: throw GradleException("Falta BITSHARE_STORE_PASSWORD para firmar el release.")
-            keyPassword = System.getenv("BITSHARE_KEY_PASSWORD")
-                ?: throw GradleException("Falta BITSHARE_KEY_PASSWORD para firmar el release.")
+        if (canSignRelease) {
+            create("release") {
+                storeFile = file(storeFilePath!!)
+                keyAlias = releaseProperties.getProperty("keyAlias")
+                    ?: throw GradleException("Falta keyAlias en android/key.properties.")
+                this.storePassword = storePassword
+                this.keyPassword = keyPassword
+            }
         }
     }
 
     buildTypes {
         release {
-            signingConfig = signingConfigs.getByName("release")
+            if (canSignRelease) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",

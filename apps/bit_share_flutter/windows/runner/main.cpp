@@ -39,7 +39,14 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
 
   FlutterWindow window(project);
   Win32Window::Point origin(80, 60);
-  Win32Window::Size size(1040, 700);
+  // Logical (96-DPI) pixels — win32_window.cpp scales this by the actual
+  // monitor's DPI, so a size that looks right at 100% scaling can render
+  // noticeably larger on a 125–150% scaled display. Sized for the idle
+  // "paste a link" state (content maxWidth 760, and the idle body is only
+  // header + link card + footer — around 380px tall including padding);
+  // the window is a normal resizable frame, so it grows fine once
+  // results/downloads add content.
+  Win32Window::Size size(820, 440);
   if (!window.Create(L"Bit-Share", origin, size)) {
     return EXIT_FAILURE;
   }
