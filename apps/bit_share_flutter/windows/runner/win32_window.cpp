@@ -144,6 +144,18 @@ bool Win32Window::Create(const std::wstring& title,
     return false;
   }
 
+  // Explicitly apply the application icon to both window sizes. Windows uses
+  // these handles for the caption and the taskbar button.
+  const auto app_icon = static_cast<HICON>(LoadImage(
+      GetModuleHandle(nullptr), MAKEINTRESOURCE(IDI_APP_ICON), IMAGE_ICON, 0,
+      0, LR_DEFAULTSIZE | LR_SHARED));
+  if (app_icon) {
+    SendMessage(window, WM_SETICON, ICON_BIG,
+                reinterpret_cast<LPARAM>(app_icon));
+    SendMessage(window, WM_SETICON, ICON_SMALL,
+                reinterpret_cast<LPARAM>(app_icon));
+  }
+
   UpdateTheme(window);
 
   return OnCreate();

@@ -43,11 +43,11 @@ Bit-Share no elimina DRM, no sortea pagos, no accede a contenido privado sin
 autorización y no garantiza compatibilidad con cada enlace: la disponibilidad
 depende del sitio de origen, sus permisos y sus cambios técnicos.
 
-## Descargar Bit-Share 1.0.2
+## Descargar Bit-Share 1.0.3
 
 ### Windows 64-bit
 
-1. Descarga \`Bit-Share-Setup-1.0.2.exe\` desde
+1. Descarga \`Bit-Share-Setup-1.0.3.exe\` desde
    [Releases](https://github.com/BitStationBusiness/Bit-Share/releases).
 2. Ejecútalo y elige el idioma.
 3. El instalador deja Bit-Share en \`C:\\Bit-Share\` e incluye el runtime que
@@ -55,7 +55,7 @@ depende del sitio de origen, sus permisos y sus cambios técnicos.
 
 ### Android
 
-1. Descarga \`Bit-Share-v1.0.2.apk\` desde
+1. Descarga \`Bit-Share-v1.0.3.apk\` desde
    [Releases](https://github.com/BitStationBusiness/Bit-Share/releases).
 2. Ábrelo en Android y autoriza la instalación desde esa fuente si el sistema
    lo solicita.

@@ -1,8 +1,8 @@
-; Bit-Share Windows installer — release v1.0.2
+; Bit-Share Windows installer — release v1.0.3
 ; Build after `flutter build windows --release` from the Flutter app directory.
 
 #define MyAppName "Bit-Share"
-#define MyAppVersion "1.0.2"
+#define MyAppVersion "1.0.3"
 #define MyAppPublisher "BitStation"
 #define MyAppURL "https://github.com/BitStationBusiness/Bit-Share"
 #define MyAppExeName "bit_share.exe"
@@ -19,8 +19,8 @@ AppUpdatesURL={#MyAppURL}/releases
 DefaultDirName=C:\Bit-Share
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
-OutputDir=..\\..\\artifacts\\release\\v1.0.2
-OutputBaseFilename=Bit-Share-Setup-1.0.2
+OutputDir=..\\..\\artifacts\\release\\v1.0.3
+OutputBaseFilename=Bit-Share-Setup-1.0.3
 SetupIconFile=..\\..\\apps\\bit_share_flutter\\windows\\runner\\resources\\app_icon.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 Compression=lzma2/ultra64
