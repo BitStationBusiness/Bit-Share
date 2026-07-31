@@ -21,8 +21,14 @@ function Get-VerifiedDownload {
         [string] $ExpectedSha256
     )
 
+    # --silent: curl's progress meter writes to stderr even on success, and
+    # PowerShell 5.1 promotes that into a terminating NativeCommandError
+    # under $ErrorActionPreference = 'Stop' — this avoids that entirely
+    # rather than masking real failures, which --fail still catches.
     & curl.exe `
         --fail `
+        --silent `
+        --show-error `
         --location `
         --retry 3 `
         --connect-timeout 20 `
