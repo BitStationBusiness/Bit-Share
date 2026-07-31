@@ -1,0 +1,30 @@
+# Workspace
+.idea/
+.vscode/
+*.iml
+*.log
+
+# Flutter and Dart
+**/.dart_tool/
+**/.flutter-plugins-dependencies
+**/.pub/
+**/build/
+**/coverage/
+
+# Android local configuration and outputs
+**/android/local.properties
+**/android/key.properties
+**/android/.gradle/
+**/android/app/debug/
+**/android/app/profile/
+**/android/app/release/
+
+# Local PDF inspection output
+tmp/
+
+# Release credentials and generated packages
+**/*.jks
+**/*.keystore
+artifacts/
+apps/bit_share_flutter/windows/runtime/*.exe
+apps/bit_share_flutter/windows/runtime/VERSIONS.txt

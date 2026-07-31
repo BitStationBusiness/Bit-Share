@@ -1,0 +1,513 @@
+BIT-SHARE - DOSIER COMPLETO PARA CREAR LA PAGINA WEB
+Actualizado: 30 de julio de 2026
+Idioma principal de la web: español
+Marca responsable: BitStation
+
+INSTRUCCION PARA LA IA QUE CONSTRUIRA LA WEB
+
+Usa este documento como fuente de verdad para crear la página de producto de
+Bit-Share. La web debe ser clara, moderna, adaptable a móvil y escritorio, y
+honesta sobre el alcance actual. No inventes funciones, plataformas, cifras,
+opiniones de usuarios, certificaciones, disponibilidad en tiendas ni garantías
+de compatibilidad. Distingue siempre entre contenido público compatible y
+contenido privado, protegido o dependiente de una cuenta.
+
+
+1. IDENTIDAD DEL PRODUCTO
+
+Nombre: Bit-Share
+Desarrollador y marca: BitStation
+Tipo: herramienta local para Android que recibe enlaces desde el menú Compartir,
+consulta los formatos públicos disponibles y permite descargar el contenido
+compatible como vídeo o audio.
+Versión actual: 0.1.0+1
+Estado: prototipo funcional / beta técnica para Android ARM64.
+Nombre del paquete Android: com.bitstation.bitshare
+Android mínimo configurado: API 26, equivalente a Android 8.0.
+Dispositivo físico principal validado: HONOR LLY-NX1, Android 16, ARM64.
+Plataformas preparadas en el proyecto Flutter: Android, Web y Windows.
+Plataforma funcional y prioritaria en este momento: Android.
+Web y Windows conservan la estructura del proyecto, pero todavía no incluyen el
+motor nativo de descarga. No deben anunciarse como versiones disponibles.
+
+
+2. DESCRIPCIONES LISTAS PARA USAR
+
+Descripción muy corta:
+Descarga contenido público compatible directamente desde el menú Compartir de
+Android, eligiendo vídeo, audio y resolución.
+
+Descripción corta:
+Bit-Share convierte el menú Compartir de Android en una herramienta de descarga
+local. Comparte un enlace público compatible, elige si deseas vídeo o audio,
+selecciona una de las resoluciones realmente disponibles y guarda el resultado
+en tu dispositivo.
+
+Descripción larga:
+Bit-Share es una utilidad Android creada por BitStation para simplificar la
+descarga de contenido público y autorizado. No necesitas copiar y pegar enlaces
+ni abrir una aplicación principal: desde el navegador o una aplicación
+compatible, pulsa Compartir y selecciona Bit-Share. La herramienta analiza el
+enlace, consulta los formatos que el proveedor expone en ese momento y muestra
+una interfaz compacta con las opciones relevantes.
+
+El usuario puede escoger entre vídeo y solo audio. Para vídeo, Bit-Share muestra
+las resoluciones detectadas en una lista ordenada y selecciona inicialmente la
+mejor opción disponible hasta 1080p, sin ocultar calidades superiores cuando el
+proveedor las ofrece. Cuando audio y vídeo llegan en pistas separadas, FFmpeg
+las combina localmente. El resultado se publica en la carpeta de descargas del
+teléfono y puede volver a compartirse con otras aplicaciones.
+
+Bit-Share no utiliza servidores de BitStation para procesar los enlaces, no
+requiere una cuenta propia, no lee cookies de Chrome, Instagram ni otras
+aplicaciones y no intenta evadir DRM o controles de acceso. La compatibilidad
+depende de que el enlace sea público, el sitio siga exponiendo formatos
+descargables y el extractor incluido en la versión instalada continúe siendo
+compatible.
+
+
+3. PROPUESTA DE VALOR
+
+- Flujo directo desde el menú Compartir de Android.
+- Sin pantalla principal innecesaria ni pasos de copiar y pegar.
+- Elección entre vídeo y solo audio antes de descargar.
+- Lista ordenada con las resoluciones realmente encontradas.
+- Estimación de tamaño cuando el proveedor ofrece datos suficientes.
+- Procesamiento y guardado local en el dispositivo.
+- Sin cuenta de Bit-Share, anuncios ni suscripción.
+- Privacidad por diseño: no reutiliza sesiones privadas de otras aplicaciones.
+- Donaciones opcionales que nunca bloquean las descargas.
+
+
+4. FUNCIONES DISPONIBLES ACTUALMENTE
+
+Recepción desde Android:
+- Bit-Share aparece como destino dentro del menú Compartir.
+- Recibe enlaces compartidos como texto mediante ACTION_SEND.
+- El manifiesto también declara ACTION_SEND_MULTIPLE y tipos de imagen, audio y
+  vídeo, aunque el flujo de descarga funcional de esta beta está centrado en
+  enlaces web públicos. No anunciar todavía importación completa de archivos.
+- La aplicación no tiene una actividad MAIN/LAUNCHER: no aparece como icono
+  abrible en el cajón de aplicaciones.
+- El icono de Bit-Share sí puede aparecer en el menú Compartir y en
+  Ajustes > Aplicaciones.
+- La aplicación se puede desinstalar normalmente desde Ajustes > Aplicaciones.
+
+Análisis de enlaces:
+- Extrae la primera URL HTTP o HTTPS válida del texto compartido.
+- Detecta proveedores conocidos y admite también hosts web públicos genéricos.
+- Consulta automáticamente metadatos y formatos al abrirse.
+- No muestra una pantalla intermedia con un único botón inútil.
+- Presenta mensajes comprensibles cuando un enlace ya no existe, no contiene
+  vídeo, exige una sesión privada o no es compatible.
+
+Opciones de descarga:
+- Selector de modo Audio o Vídeo.
+- Lista desplegable de resoluciones ordenadas de mayor a menor.
+- Selección inicial de la mejor resolución disponible hasta 1080p.
+- Las resoluciones superiores, por ejemplo 1440p o 2160p, siguen disponibles si
+  el proveedor las expone.
+- Tamaño estimado por opción cuando existe información suficiente.
+- Aviso y bloqueo preventivo si la estimación no cabe en el almacenamiento.
+- Sin límite artificial de tamaño o número de descargas.
+- El límite real es el espacio disponible, la red, el proveedor y los recursos
+  del dispositivo.
+
+Procesamiento multimedia:
+- Descarga de vídeo compatible.
+- Extracción de solo audio a M4A.
+- Unión de pistas separadas de vídeo y audio.
+- Salida de vídeo preferente en MP4 cuando es posible.
+- Uso local de FFmpeg 7.1.1 para combinación y conversión.
+- Archivos temporales aislados por tarea y eliminados al finalizar.
+
+Progreso y resultado:
+- Indicador de progreso y porcentaje.
+- Estimación de tiempo restante cuando el motor la proporciona.
+- Botón para cancelar la tarea activa.
+- Publicación final mediante MediaStore.
+- Carpeta habitual de salida: Descargas/Bit-Share.
+- Pantalla de finalización con opción para compartir el archivo generado.
+
+Donaciones:
+- Contador local de descargas completadas.
+- Cada cinco descargas publicadas correctamente aparece un agradecimiento.
+- El mensaje ofrece una donación voluntaria mediante Ko-fi.
+- Botones: Ahora no y Donar.
+- Rechazar u omitir la donación no limita ninguna función.
+- Enlace oficial de donación: https://ko-fi.com/bitstation
+
+Interfaz:
+- Hoja compacta superpuesta sobre la aplicación de origen.
+- Tema oscuro con acentos morados.
+- Controles principales: cerrar, Audio, Vídeo, Resolución y Descargar.
+- Pie de marca: powered by BitStation.
+- El pie usa la tipografía Press Start 2P de Google Fonts.
+- La interfaz principal prioriza tipografía legible y controles grandes.
+
+
+5. COMPATIBILIDAD DE SITIOS
+
+Bit-Share no usa una lista cerrada para rechazar dominios públicos antes de
+consultar el extractor. Tiene nombres reconocibles para, entre otros:
+
+- YouTube
+- Facebook
+- X / Twitter
+- Instagram para contenido público compatible
+- Threads para publicaciones públicas con vídeo
+- TikTok
+- Vimeo
+- Reddit
+- Otros sitios web públicos compatibles con yt-dlp o con el resolvedor propio
+
+También puede funcionar con sitios de contenido para adultos cuando el recurso
+es público, legal, autorizado, no usa DRM y el sitio expone un formato
+descargable. La categoría del sitio no cambia las reglas de seguridad o acceso.
+
+La frase correcta para marketing es:
+"Compatible con numerosos sitios y enlaces web públicos."
+
+No usar estas promesas:
+- "Compatible con cualquier sitio."
+- "Descarga cualquier vídeo."
+- "Compatibilidad 100 % garantizada."
+- "Descarga contenido privado."
+- "Evita restricciones, DRM o inicios de sesión."
+
+La compatibilidad puede cambiar cuando una plataforma modifica su web, sus
+tokens, sus formatos, su API o sus políticas.
+
+
+6. CASOS Y RESOLUCIONES VALIDADOS
+
+- YouTube: detección física de 144p, 240p, 360p, 480p, 720p, 1080p, 1440p y
+  2160p en un vídeo público que ofrecía esas calidades.
+- YouTube: descarga de prueba, unión con FFmpeg, publicación como MP4 y
+  reproducción en el teléfono.
+- YouTube: extracción del mismo contenido como audio M4A.
+- Facebook: recepción desde Compartir, descarga pública y reproducción
+  comprobadas.
+- Threads: los enlaces cortos /share/ se resuelven hasta la publicación real.
+- Threads: dos enlaces públicos reales descargados correctamente en el HONOR.
+- Primer Threads validado: H.264 1280 x 720, audio AAC, 1.502.234 bytes.
+- Segundo Threads validado en release: H.264 960 x 720, audio AAC,
+  1.504.419 bytes.
+- Sitios que requieren una huella TLS de navegador: soporte local mediante
+  curl-cffi con impersonación de Chrome, sin usar las cookies de Chrome.
+
+Estas pruebas demuestran el funcionamiento de los casos concretos, no una
+garantía permanente sobre todos los enlaces de esas plataformas.
+
+
+7. PRIVACIDAD Y SEGURIDAD
+
+- El procesamiento se realiza localmente en el teléfono.
+- Las conexiones de descarga se realizan directamente con el proveedor.
+- BitStation no recibe la URL, el archivo descargado ni el historial mediante
+  un servidor propio en esta beta.
+- No existe telemetría integrada.
+- No se requiere una cuenta de Bit-Share.
+- No se leen cookies, tokens, caché o bases de datos privadas de Chrome,
+  Instagram, Facebook u otras aplicaciones.
+- No se capturan nombres de usuario ni contraseñas.
+- No se usa root, Shizuku, Accessibility Service, hooking ni técnicas
+  equivalentes.
+- No se evade DRM, cifrado, paywalls o controles de acceso.
+- El tráfico HTTP sin cifrar está deshabilitado.
+- Las copias de seguridad Android de los datos de la app están deshabilitadas.
+- Se rechazan URLs con credenciales embebidas.
+- Se bloquean localhost, hosts locales y direcciones IP privadas, loopback,
+  link-local o multicast.
+- Los diagnósticos eliminan URLs y patrones que parezcan credenciales.
+- Máximo previsto por Intent: 20 URI y 100.000 caracteres de texto.
+
+Texto recomendado para privacidad:
+"Bit-Share procesa tus solicitudes localmente y se conecta directamente con el
+proveedor del enlace. No necesita una cuenta de Bit-Share y no copia cookies,
+contraseñas ni sesiones de otras aplicaciones."
+
+
+8. LIMITACIONES IMPORTANTES
+
+- Solo se descarga contenido propio, autorizado, libre o cuya descarga esté
+  permitida.
+- Bit-Share no concede derechos sobre el contenido obtenido.
+- No puede acceder a publicaciones, historias o archivos privados solo porque
+  el usuario pueda verlos dentro de otra aplicación.
+- Android comparte el enlace, pero no entrega la sesión privada de la app de
+  origen.
+- No existe inicio de sesión de Instagram dentro de Bit-Share.
+- La API oficial de Instagram no permite usar una cuenta personal para acceder
+  a historias privadas de amigos.
+- Bit-Share no copiará cookies o credenciales para resolver esa limitación.
+- El contenido con DRM o controles técnicos de acceso no es compatible.
+- Algunos enlaces caducan o cambian y pueden dejar de funcionar.
+- YouTube puede exigir Proof of Origin tokens en determinados vídeos o
+  formatos; Bit-Share no genera tokens ligados a cuentas.
+- La descarga no está implementada todavía como un trabajo persistente de
+  WorkManager o foreground service. No prometer que todas las tareas sobrevivirán
+  a cierres forzados, reinicios o políticas agresivas de batería.
+- La beta actual está validada principalmente en Android ARM64.
+- Web y Windows no tienen todavía el motor de descarga.
+
+
+9. ACTUALIZACIONES
+
+- yt-dlp y las dependencias NO se actualizan automáticamente al abrir la app.
+- No se descarga ni ejecuta código nuevo en segundo plano.
+- Las versiones están incluidas y fijadas dentro del APK.
+- Para actualizar yt-dlp, curl-cffi, FFmpeg, Python u otra dependencia se debe
+  compilar, probar y firmar un APK nuevo.
+- Esta decisión reduce el riesgo de ejecutar dependencias no verificadas.
+
+Componentes principales incluidos:
+- Flutter / Dart
+- Kotlin para la integración Android
+- CPython 3.13
+- Chaquopy 17.0.0
+- yt-dlp 2026.07.04
+- curl-cffi 0.15.0
+- FFmpeg 7.1.1
+- Press Start 2P con licencia SIL Open Font License 1.1
+
+
+10. IDENTIDAD VISUAL
+
+Concepto:
+Una herramienta discreta, directa y técnica de BitStation. Debe sentirse como
+una extensión del menú Compartir, no como una red social ni un navegador.
+
+Icono:
+- Archivo maestro: apps/bit_share_flutter/assets/branding/bit_share_icon_v2.png
+- Diseño original: tres nodos conectados que representan compartir y una flecha
+  central descendente que representa descargar.
+- Símbolo blanco, simple y reconocible a tamaño pequeño.
+- Fondo cuadrado redondeado.
+- Gradiente de azul cian en la parte superior izquierda a violeta intenso en la
+  parte inferior derecha.
+- Sin texto dentro del icono.
+- Sin marco negro externo.
+- No reutiliza el símbolo orbital de BitMusic.
+
+Paleta orientativa para la web:
+- Fondo principal casi negro: #0B0911
+- Superficie oscura: #17131F
+- Superficie secundaria: #211A2C
+- Azul cian de marca: #16B9EE
+- Azul medio: #3E86F8
+- Violeta de marca: #8350FF
+- Morado claro para acciones: #C8B5FF
+- Texto principal: #F6F2FA
+- Texto secundario: #C9C1D1
+- Error: #FFB4AB
+
+Tipografía sugerida:
+- Titulares y cuerpo: una sans serif moderna, clara y accesible.
+- Detalles de marca pequeños: Press Start 2P.
+- No usar Press Start 2P en párrafos largos.
+
+Estilo:
+- Tema oscuro.
+- Tarjetas con bordes redondeados.
+- Contraste alto.
+- Gradientes contenidos, no excesivos.
+- Capturas grandes del flujo real.
+- Animaciones discretas.
+- No usar estética de piratería, hackers o evasión de restricciones.
+
+
+11. ESTRUCTURA RECOMENDADA PARA LA PAGINA
+
+Cabecera:
+- Logotipo/icono Bit-Share.
+- Nombre Bit-Share.
+- Enlaces: Funciones, Cómo funciona, Privacidad, Compatibilidad, Preguntas y
+  Descarga.
+- Acción principal: Descargar para Android.
+
+Hero:
+Título sugerido:
+"Comparte el enlace. Elige el formato. Descárgalo."
+
+Subtítulo sugerido:
+"Bit-Share lleva la descarga de contenido público compatible directamente al
+menú Compartir de Android, con selección de vídeo, audio y resolución."
+
+Acciones:
+- Descargar APK para Android
+- Ver cómo funciona
+
+Microtexto:
+"Beta técnica para Android ARM64. Usa Bit-Share únicamente con contenido propio
+o autorizado."
+
+Sección Cómo funciona:
+1. Abre un contenido público compatible.
+2. Pulsa Compartir y elige Bit-Share.
+3. Selecciona Audio o Vídeo.
+4. Elige una resolución disponible.
+5. Descarga y guarda el resultado en tu dispositivo.
+
+Sección de funciones:
+- Desde el menú Compartir.
+- Audio o vídeo.
+- Resoluciones reales.
+- Procesamiento local.
+- Sin cuenta.
+- Espacio bajo control.
+- Guarda y vuelve a compartir.
+- Donaciones totalmente opcionales.
+
+Sección de privacidad:
+Destacar procesamiento local, conexión directa, ausencia de cuenta y prohibición
+de copiar sesiones de otras apps.
+
+Sección de compatibilidad:
+Mostrar proveedores conocidos como ejemplos, acompañados siempre por el texto
+"La disponibilidad depende del enlace y del proveedor."
+
+Sección de limitaciones:
+Explicar de forma visible que no descarga contenido privado, DRM, paywalls o
+contenido dependiente de una sesión no proporcionada oficialmente.
+
+Sección de pruebas:
+Mencionar el HONOR con Android 16 y los casos públicos validados. No presentar
+los ejemplos como certificación oficial de las plataformas.
+
+Sección de donación:
+Texto sugerido:
+"Bit-Share no tiene anuncios ni suscripción. Si te resulta útil, puedes apoyar
+el desarrollo de BitStation con una donación opcional."
+Botón: Apoyar en Ko-fi
+URL: https://ko-fi.com/bitstation
+
+Preguntas frecuentes:
+
+P: ¿Necesito crear una cuenta?
+R: No. Bit-Share no utiliza cuentas propias.
+
+P: ¿Lee mi sesión de Chrome, Instagram o Facebook?
+R: No. Android aísla los datos privados de cada aplicación y Bit-Share no copia
+cookies, contraseñas ni tokens.
+
+P: ¿Puede descargar historias privadas de Instagram?
+R: No. Un enlace compartido no incluye la sesión privada de Instagram y la API
+oficial no concede acceso general a historias de amigos.
+
+P: ¿Qué resoluciones admite?
+R: Muestra las resoluciones que el proveedor expone para cada enlace. En pruebas
+se han detectado opciones desde 144p hasta 2160p.
+
+P: ¿Tiene límite de descarga?
+R: No existe un límite artificial impuesto por Bit-Share. La descarga depende
+del almacenamiento libre, la red, el dispositivo y el proveedor.
+
+P: ¿Dónde se guardan los archivos?
+R: Normalmente en Descargas/Bit-Share mediante el almacenamiento multimedia de
+Android.
+
+P: ¿Por qué no aparece en el cajón de aplicaciones?
+R: Bit-Share está diseñada como receptor del menú Compartir. Puede encontrarse y
+desinstalarse desde Ajustes > Aplicaciones.
+
+P: ¿Se actualiza yt-dlp automáticamente?
+R: No. Las dependencias se actualizan mediante un APK nuevo, probado y firmado.
+
+P: ¿Funciona con todos los sitios?
+R: No se puede garantizar compatibilidad universal. Funciona cuando el enlace es
+público, el proveedor expone formatos compatibles y no existen DRM o controles
+de acceso.
+
+
+12. SEO Y METADATOS SUGERIDOS
+
+Title:
+Bit-Share para Android | Descarga vídeo o audio desde Compartir
+
+Meta description:
+Comparte un enlace público compatible con Bit-Share, elige vídeo, audio y
+resolución, y guarda el resultado localmente en Android.
+
+Palabras y conceptos relevantes:
+Bit-Share, BitStation, Android, menú Compartir, descargar vídeo, descargar
+audio, elegir resolución, procesamiento local, herramienta multimedia.
+
+Open Graph title:
+Bit-Share - Comparte, elige y descarga
+
+Open Graph description:
+Una herramienta Android de BitStation para descargar contenido público
+compatible como vídeo o audio, directamente desde el menú Compartir.
+
+
+13. TEXTOS LEGALES RECOMENDADOS
+
+Aviso de uso:
+"Descarga únicamente contenido propio, autorizado, libre o cuya descarga esté
+permitida. Respeta los derechos de autor, las condiciones del proveedor y la
+legislación aplicable. Bit-Share no evade DRM ni controles de acceso."
+
+Aviso de compatibilidad:
+"Los sitios web cambian con frecuencia. La presencia de una plataforma en esta
+página no implica afiliación, aprobación ni compatibilidad garantizada con
+todos sus enlaces."
+
+Aviso de marcas:
+"YouTube, Facebook, Instagram, Threads, TikTok, Vimeo, Reddit y X son marcas de
+sus respectivos propietarios. Bit-Share y BitStation no están afiliados ni
+respaldados por dichas plataformas."
+
+
+14. RECURSOS DISPONIBLES EN EL PROYECTO
+
+Icono maestro:
+apps/bit_share_flutter/assets/branding/bit_share_icon_v2.png
+
+Capturas y evidencias existentes:
+- docs/evidence/physical-generic-web-compact.png
+- docs/evidence/physical-auto-options-branding.png
+- docs/evidence/physical-download-options.png
+- docs/evidence/physical-youtube-download-success.png
+- docs/evidence/physical-youtube-playback.png
+- docs/evidence/physical-facebook-share.png
+- docs/evidence/physical-facebook-download-release.png
+
+APK de desarrollo actual:
+apps/bit_share_flutter/build/app/outputs/flutter-apk/app-release.apk
+
+IMPORTANTE PARA PUBLICACION:
+El APK actual está firmado con un certificado Android de depuración. Antes de
+ofrecerlo públicamente debe generarse una clave de producción, configurar una
+firma release estable, revisar las licencias de youtubedl-android y FFmpeg,
+publicar los avisos correspondientes y repetir las pruebas finales.
+
+
+15. COSAS QUE LA WEB NO DEBE AFIRMAR
+
+- Que Bit-Share puede descargar cualquier vídeo o cualquier sitio.
+- Que funciona con contenido privado o restringido.
+- Que permite iniciar sesión en Instagram para descargar historias de amigos.
+- Que evade DRM, paywalls, límites o controles de acceso.
+- Que las dependencias se actualizan automáticamente en segundo plano.
+- Que existe una versión funcional para Windows o Web.
+- Que está publicada en Google Play.
+- Que el APK actual usa una firma de producción.
+- Que existe sincronización en la nube.
+- Que hay historial, cola persistente o recuperación garantizada tras reinicio.
+- Que BitStation está afiliada con las plataformas compatibles.
+
+
+16. RESULTADO ESPERADO DE LA IA WEB
+
+Crear una página de producto en español que:
+- use el icono y la paleta indicados;
+- explique el flujo en menos de cinco pasos;
+- priorice un botón de descarga Android;
+- presente funciones y privacidad con lenguaje sencillo;
+- incluya limitaciones y aviso legal visibles;
+- enlace a Ko-fi como apoyo opcional;
+- reserve el enlace del APK hasta que exista una release firmada para
+  producción;
+- sea responsive, accesible y rápida;
+- no dependa de afirmaciones que no estén respaldadas por este documento.
