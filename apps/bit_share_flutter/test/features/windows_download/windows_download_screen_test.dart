@@ -10,6 +10,7 @@ void main() {
   ) async {
     await tester.binding.setSurfaceSize(const Size(1200, 900));
     addTearDown(() => tester.binding.setSurfaceSize(null));
+    String? copiedText;
     tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
       SystemChannels.platform,
       (call) async {
@@ -17,6 +18,10 @@ void main() {
           return <String, dynamic>{
             'text': 'https://www.youtube.com/watch?v=example',
           };
+        }
+        if (call.method == 'Clipboard.setData') {
+          copiedText =
+              (call.arguments as Map<Object?, Object?>)['text'] as String?;
         }
         return null;
       },
@@ -55,6 +60,18 @@ void main() {
 
     expect(backend.downloadedHeight, 720);
     expect(find.text('Descarga completada'), findsOneWidget);
+    expect(find.text('VÃ­deo de prueba'), findsNothing);
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const Key('windows-url-field')))
+          .controller
+          ?.text,
+      isEmpty,
+    );
+
+    await tester.tap(find.byKey(const Key('windows-copy-path-button')));
+    await tester.pump();
+    expect(copiedText, r'C:\Users\Test\Downloads\Bit-Share\video.mp4');
   });
 
   testWidgets('solo muestra autenticación cuando el motor la solicita', (

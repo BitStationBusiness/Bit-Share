@@ -34,16 +34,17 @@ internal class MediaStoreRepository(
             return PublishedMedia(Uri.fromFile(fallback), fallback.name, mimeType)
         }
 
+        val destination = destinationFor(mimeType)
         val values = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, source.name)
             put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
             put(
                 MediaStore.MediaColumns.RELATIVE_PATH,
-                "${Environment.DIRECTORY_DOWNLOADS}/Bit-Share",
+                "${destination.directory}/Bit-Share",
             )
             put(MediaStore.MediaColumns.IS_PENDING, 1)
         }
-        val collection = MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+        val collection = destination.collection
         val resolver = context.contentResolver
         val uri = resolver.insert(collection, values)
             ?: throw IOException("Android no pudo crear el archivo de destino.")
@@ -74,4 +75,38 @@ internal class MediaStoreRepository(
                 else -> "application/octet-stream"
             }
     }
+
+    private fun destinationFor(mimeType: String): MediaDestination {
+        return when {
+            mimeType.startsWith("video/") -> MediaDestination(
+                directory = Environment.DIRECTORY_MOVIES,
+                collection = MediaStore.Video.Media.getContentUri(
+                    MediaStore.VOLUME_EXTERNAL_PRIMARY,
+                ),
+            )
+            mimeType.startsWith("image/") -> MediaDestination(
+                directory = Environment.DIRECTORY_PICTURES,
+                collection = MediaStore.Images.Media.getContentUri(
+                    MediaStore.VOLUME_EXTERNAL_PRIMARY,
+                ),
+            )
+            mimeType.startsWith("audio/") -> MediaDestination(
+                directory = Environment.DIRECTORY_MUSIC,
+                collection = MediaStore.Audio.Media.getContentUri(
+                    MediaStore.VOLUME_EXTERNAL_PRIMARY,
+                ),
+            )
+            else -> MediaDestination(
+                directory = Environment.DIRECTORY_DOWNLOADS,
+                collection = MediaStore.Downloads.getContentUri(
+                    MediaStore.VOLUME_EXTERNAL_PRIMARY,
+                ),
+            )
+        }
+    }
+
+    private data class MediaDestination(
+        val directory: String,
+        val collection: Uri,
+    )
 }

@@ -454,10 +454,25 @@ class _WindowsDownloadScreenState extends State<WindowsDownloadScreen> {
                 ),
               ),
               const SizedBox(height: 12),
-              FilledButton.icon(
-                onPressed: widget.backend.openOutputDirectory,
-                icon: const Icon(Icons.folder_open_outlined, size: 17),
-                label: const Text('Mostrar en Descargas'),
+              Row(
+                children: [
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: widget.backend.openOutputDirectory,
+                      icon: const Icon(Icons.folder_open_outlined, size: 17),
+                      label: const Text('Mostrar en Descargas'),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      key: const Key('windows-copy-path-button'),
+                      onPressed: () => unawaited(_copyCompletedPath()),
+                      icon: const Icon(Icons.content_copy_outlined, size: 17),
+                      label: const Text('Copiar al portapapeles'),
+                    ),
+                  ),
+                ],
               ),
             ],
           ],
@@ -561,7 +576,14 @@ class _WindowsDownloadScreenState extends State<WindowsDownloadScreen> {
           });
         },
       );
-      if (mounted) setState(() => _completedPath = result.filePath);
+      if (!mounted) return;
+      _urlController.clear();
+      setState(() {
+        _completedPath = result.filePath;
+        _inspection = null;
+        _selectedHeight = null;
+        _activeBrowserSession = null;
+      });
     } on WindowsDownloadException catch (error) {
       if (!mounted) return;
       setState(() {
@@ -575,6 +597,16 @@ class _WindowsDownloadScreenState extends State<WindowsDownloadScreen> {
     } finally {
       if (mounted) setState(() => _downloading = false);
     }
+  }
+
+  Future<void> _copyCompletedPath() async {
+    final path = _completedPath;
+    if (path == null || path.isEmpty) return;
+    await Clipboard.setData(ClipboardData(text: path));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Ruta copiada al portapapeles.')),
+    );
   }
 
   Future<void> _openLogin() async {
