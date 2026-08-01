@@ -69,7 +69,7 @@ class BitShareApp extends StatelessWidget {
         ),
       ),
       home: openedFromShare
-          ? const ShareReceiverScreen()
+          ? const UpdateGate(child: ShareReceiverScreen())
           : UpdateGate(
               child: isWindows ? WindowsDownloadScreen() : const HomeScreen(),
             ),
