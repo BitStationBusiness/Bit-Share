@@ -2,9 +2,11 @@ package com.bitstation.bitshare.download
 
 import android.app.Activity
 import android.content.ActivityNotFoundException
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ApplicationInfo
+import android.content.pm.PackageManager
 import android.os.Environment
 import android.os.StatFs
 import android.system.Os
@@ -228,12 +230,25 @@ internal class DownloadCoordinator(
      * interface.
      */
     fun openLibrary(activity: Activity): Boolean {
-        val galleryIntent = Intent.makeMainSelectorActivity(
-            Intent.ACTION_MAIN,
-            Intent.CATEGORY_APP_GALLERY,
-        )
+        val galleryIntent = Intent(Intent.ACTION_MAIN).apply {
+            addCategory(Intent.CATEGORY_APP_GALLERY)
+        }
         return try {
-            activity.startActivity(galleryIntent)
+            // Do not launch a selector: on some HONOR devices the selector is
+            // incorrectly handled by Files. Resolve the APP_GALLERY activity
+            // and make it explicit so the installed visual gallery is opened.
+            val galleryActivity = appContext.packageManager.resolveActivity(
+                galleryIntent,
+                PackageManager.MATCH_DEFAULT_ONLY,
+            ) ?: return false
+            activity.startActivity(
+                galleryIntent.apply {
+                    component = ComponentName(
+                        galleryActivity.activityInfo.packageName,
+                        galleryActivity.activityInfo.name,
+                    )
+                },
+            )
             true
         } catch (notFound: ActivityNotFoundException) {
             false
