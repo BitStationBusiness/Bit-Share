@@ -80,6 +80,24 @@ depende del sitio de origen, sus permisos y sus cambios técnicos.
 
 ---
 
+## Android vs Windows
+
+Ambas versiones comparten el mismo motor de descarga y los mismos sitios
+soportados. Lo que cambia es cómo le entregas el enlace y qué haces con el
+archivo después, porque cada plataforma sigue sus propias convenciones.
+
+| | Android | Windows |
+|---|---|---|
+| **Cómo entra el enlace** | ✅ Menú **Compartir** del sistema, desde cualquier app | ✅ Pega el enlace en la ventana con `Ctrl+V` |
+| **Selección de resolución y audio** | ✅ | ✅ |
+| **Historias de Instagram y Facebook** | ✅ | ✅ |
+| **Sesión de navegador para contenido con login** | ✅ Ventana propia dentro de la app | ✅ Usa tu Chrome, Edge o Firefox instalado |
+| **Después de descargar** | ✅ Botones **Galería** y **Compartir** directos | ✅ Abrir carpeta de Descargas o copiar el archivo |
+| **Runtime necesario (Python, FFmpeg)** | ✅ Empaquetado dentro del APK | ✅ Empaquetado dentro del instalador |
+| **Chequeo de actualizaciones** | ✅ Al abrir la app y al abrirla desde Compartir | ✅ Al abrir la app |
+
+---
+
 ## Instalación
 
 ### Windows 64-bit
