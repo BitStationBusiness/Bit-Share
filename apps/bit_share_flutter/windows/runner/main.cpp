@@ -46,7 +46,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   // header + link card + footer — around 380px tall including padding);
   // the window is a normal resizable frame, so it grows fine once
   // results/downloads add content.
-  Win32Window::Size size(820, 440);
+  Win32Window::Size size(440, 500);
   if (!window.Create(L"Bit-Share", origin, size)) {
     return EXIT_FAILURE;
   }

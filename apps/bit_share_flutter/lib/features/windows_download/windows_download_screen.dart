@@ -44,9 +44,9 @@ class _WindowsDownloadScreenState extends State<WindowsDownloadScreen> {
       body: SafeArea(
         child: Center(
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 760),
+            constraints: const BoxConstraints(maxWidth: 520),
             child: ListView(
-              padding: const EdgeInsets.fromLTRB(24, 20, 24, 16),
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
               children: [
                 Row(
                   children: [
@@ -100,10 +100,10 @@ class _WindowsDownloadScreenState extends State<WindowsDownloadScreen> {
                     ),
                   ],
                 ),
-                const SizedBox(height: 18),
+                const SizedBox(height: 14),
                 Card(
                   child: Padding(
-                    padding: const EdgeInsets.all(16),
+                    padding: const EdgeInsets.all(14),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
@@ -219,7 +219,7 @@ class _WindowsDownloadScreenState extends State<WindowsDownloadScreen> {
                   const SizedBox(height: 12),
                   _buildTaskStatus(context),
                 ],
-                const SizedBox(height: 20),
+                const SizedBox(height: 14),
                 Text(
                   'powered by BitStation',
                   textAlign: TextAlign.center,
@@ -259,7 +259,7 @@ class _WindowsDownloadScreenState extends State<WindowsDownloadScreen> {
 
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(14),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -328,7 +328,7 @@ class _WindowsDownloadScreenState extends State<WindowsDownloadScreen> {
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxHeight: 210),
+                  constraints: const BoxConstraints(maxHeight: 180),
                   child: ListView.separated(
                     shrinkWrap: true,
                     itemCount: inspection.resolutions.length,
