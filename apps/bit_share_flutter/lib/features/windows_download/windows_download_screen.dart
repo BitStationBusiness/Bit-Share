@@ -108,88 +108,53 @@ class _WindowsDownloadScreenState extends State<WindowsDownloadScreen> {
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         Text(
-                          'Pega un enlace',
+                          'Pega un enlace con Ctrl+V',
                           style: Theme.of(context).textTheme.titleSmall
                               ?.copyWith(fontWeight: FontWeight.w700),
                         ),
                         const SizedBox(height: 10),
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Expanded(
-                              child: TextField(
-                                key: const Key('windows-url-field'),
-                                controller: _urlController,
-                                enabled: !_downloading,
-                                keyboardType: TextInputType.url,
-                                textInputAction: TextInputAction.done,
-                                autocorrect: false,
-                                style: const TextStyle(fontSize: 13.5),
-                                decoration: InputDecoration(
-                                  isDense: true,
-                                  contentPadding: const EdgeInsets.symmetric(
-                                    horizontal: 12,
-                                    vertical: 10,
-                                  ),
-                                  hintText: 'https://...',
-                                  prefixIcon: const Icon(Icons.link, size: 18),
-                                  suffixIcon: _urlController.text.isEmpty
-                                      ? null
-                                      : IconButton(
-                                          tooltip: 'Limpiar',
-                                          onPressed: _reset,
-                                          icon: const Icon(
-                                            Icons.close,
-                                            size: 16,
-                                          ),
-                                        ),
-                                  border: const OutlineInputBorder(),
-                                ),
-                                onChanged: (_) => setState(() {
-                                  _inspection = null;
-                                  _error = null;
-                                  _authenticationRequired = false;
-                                  _activeBrowserSession = null;
-                                  _completedPath = null;
-                                }),
-                                onSubmitted: (_) => unawaited(_inspect()),
+                        CallbackShortcuts(
+                          bindings: {
+                            const SingleActivator(
+                              LogicalKeyboardKey.keyV,
+                              control: true,
+                            ): () =>
+                                unawaited(_pasteFromShortcut()),
+                          },
+                          child: TextField(
+                            key: const Key('windows-url-field'),
+                            controller: _urlController,
+                            enabled: !_downloading,
+                            keyboardType: TextInputType.url,
+                            textInputAction: TextInputAction.done,
+                            autocorrect: false,
+                            style: const TextStyle(fontSize: 13.5),
+                            decoration: InputDecoration(
+                              isDense: true,
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 10,
                               ),
-                            ),
-                            const SizedBox(width: 8),
-                            OutlinedButton.icon(
-                              key: const Key('windows-paste-button'),
-                              onPressed: _downloading ? null : _paste,
-                              icon: const Icon(
-                                Icons.content_paste_rounded,
-                                size: 16,
-                              ),
-                              label: const Text('Pegar'),
-                              style: OutlinedButton.styleFrom(
-                                minimumSize: const Size(88, 40),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            FilledButton.icon(
-                              key: const Key('windows-inspect-button'),
-                              onPressed: _inspecting || _downloading
+                              hintText: 'Pulsa Ctrl+V para pegar un enlace',
+                              prefixIcon: const Icon(Icons.link, size: 18),
+                              suffixIcon: _urlController.text.isEmpty
                                   ? null
-                                  : _inspect,
-                              icon: _inspecting
-                                  ? const SizedBox.square(
-                                      dimension: 14,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                      ),
-                                    )
-                                  : const Icon(Icons.search_rounded, size: 16),
-                              label: Text(
-                                _inspecting ? 'Analizando…' : 'Analizar',
-                              ),
-                              style: FilledButton.styleFrom(
-                                minimumSize: const Size(112, 40),
-                              ),
+                                  : IconButton(
+                                      tooltip: 'Limpiar',
+                                      onPressed: _reset,
+                                      icon: const Icon(Icons.close, size: 16),
+                                    ),
+                              border: const OutlineInputBorder(),
                             ),
-                          ],
+                            onChanged: (_) => setState(() {
+                              _inspection = null;
+                              _error = null;
+                              _authenticationRequired = false;
+                              _activeBrowserSession = null;
+                              _completedPath = null;
+                            }),
+                            onSubmitted: (_) => unawaited(_inspect()),
+                          ),
                         ),
                       ],
                     ),
@@ -501,7 +466,8 @@ class _WindowsDownloadScreenState extends State<WindowsDownloadScreen> {
     );
   }
 
-  Future<void> _paste() async {
+  Future<void> _pasteFromShortcut() async {
+    if (_inspecting || _downloading) return;
     final data = await Clipboard.getData(Clipboard.kTextPlain);
     final value = data?.text?.trim();
     if (value == null || value.isEmpty) {

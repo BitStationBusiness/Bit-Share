@@ -1,14 +1,32 @@
 import 'package:bit_share/features/windows_download/windows_download_backend.dart';
 import 'package:bit_share/features/windows_download/windows_download_screen.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  testWidgets('analiza, organiza resoluciones y descarga en Windows', (
+  testWidgets('Ctrl+V analiza, organiza resoluciones y descarga en Windows', (
     tester,
   ) async {
     await tester.binding.setSurfaceSize(const Size(1200, 900));
     addTearDown(() => tester.binding.setSurfaceSize(null));
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (call) async {
+        if (call.method == 'Clipboard.getData') {
+          return <String, dynamic>{
+            'text': 'https://www.youtube.com/watch?v=example',
+          };
+        }
+        return null;
+      },
+    );
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        null,
+      ),
+    );
     final backend = _FakeWindowsBackend();
 
     await tester.pumpWidget(
@@ -18,11 +36,13 @@ void main() {
       ),
     );
 
-    await tester.enterText(
-      find.byKey(const Key('windows-url-field')),
-      'https://www.youtube.com/watch?v=example',
-    );
-    await tester.tap(find.byKey(const Key('windows-inspect-button')));
+    expect(find.byKey(const Key('windows-paste-button')), findsNothing);
+    expect(find.byKey(const Key('windows-inspect-button')), findsNothing);
+
+    await tester.tap(find.byKey(const Key('windows-url-field')));
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
     await tester.pumpAndSettle();
 
     expect(find.text('Vídeo de prueba'), findsOneWidget);
@@ -54,7 +74,7 @@ void main() {
       find.byKey(const Key('windows-url-field')),
       'https://example.com/private',
     );
-    await tester.tap(find.byKey(const Key('windows-inspect-button')));
+    await tester.testTextInput.receiveAction(TextInputAction.done);
     await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('windows-auth-retry-button')), findsOneWidget);
