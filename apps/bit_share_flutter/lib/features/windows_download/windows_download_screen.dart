@@ -454,30 +454,42 @@ class _WindowsDownloadScreenState extends State<WindowsDownloadScreen> {
                 ),
               ),
               const SizedBox(height: 12),
-              Row(
-                children: [
-                  Expanded(
-                    child: FilledButton.icon(
-                      onPressed: widget.backend.openOutputDirectory,
-                      icon: const Icon(Icons.folder_open_outlined, size: 17),
-                      label: const Text('Mostrar en Descargas'),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      key: const Key('windows-copy-path-button'),
-                      onPressed: () => unawaited(_copyCompletedPath()),
-                      icon: const Icon(Icons.content_copy_outlined, size: 17),
-                      label: const Text('Copiar al portapapeles'),
-                    ),
-                  ),
-                ],
-              ),
+              _buildCompletedActions(context),
             ],
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildCompletedActions(BuildContext context) {
+    final openButton = FilledButton.icon(
+      onPressed: widget.backend.openOutputDirectory,
+      icon: const Icon(Icons.folder_open_outlined, size: 17),
+      label: const Text('Mostrar en Descargas'),
+    );
+    final copyButton = OutlinedButton.icon(
+      key: const Key('windows-copy-file-button'),
+      onPressed: () => unawaited(_copyCompletedFile()),
+      icon: const Icon(Icons.content_copy_outlined, size: 17),
+      label: const Text('Copiar archivo'),
+    );
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth < 430) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [openButton, const SizedBox(height: 8), copyButton],
+          );
+        }
+        return Row(
+          children: [
+            Expanded(child: openButton),
+            const SizedBox(width: 10),
+            Expanded(child: copyButton),
+          ],
+        );
+      },
     );
   }
 
@@ -599,14 +611,21 @@ class _WindowsDownloadScreenState extends State<WindowsDownloadScreen> {
     }
   }
 
-  Future<void> _copyCompletedPath() async {
+  Future<void> _copyCompletedFile() async {
     final path = _completedPath;
     if (path == null || path.isEmpty) return;
-    await Clipboard.setData(ClipboardData(text: path));
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Ruta copiada al portapapeles.')),
-    );
+    try {
+      await widget.backend.copyFileToClipboard(path);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Archivo copiado al portapapeles.')),
+      );
+    } on WindowsDownloadException catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.message)));
+    }
   }
 
   Future<void> _openLogin() async {

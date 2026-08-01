@@ -88,5 +88,7 @@ abstract interface class WindowsDownloadBackend {
 
   Future<void> openOutputDirectory();
 
+  Future<void> copyFileToClipboard(String filePath);
+
   Future<void> openLoginPage(String url, WindowsBrowserSession browserSession);
 }

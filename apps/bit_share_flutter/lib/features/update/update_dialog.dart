@@ -46,7 +46,8 @@ class _UpdateDialogState extends State<UpdateDialog> {
           constraints: const BoxConstraints(maxWidth: 380),
           child: _buildBody(theme),
         ),
-        actionsAlignment: MainAxisAlignment.spaceBetween,
+        actionsAlignment: MainAxisAlignment.end,
+        actionsPadding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
         actions: _buildActions(context),
       ),
     );
@@ -67,7 +68,7 @@ class _UpdateDialogState extends State<UpdateDialog> {
     final mutedStyle = TextStyle(color: theme.colorScheme.onSurfaceVariant);
     switch (_stage) {
       case _Stage.available:
-        final notes = _notesLines(widget.release.notes);
+        final highlights = _highlights(widget.release.notes);
         return Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -76,12 +77,23 @@ class _UpdateDialogState extends State<UpdateDialog> {
               'Bit-Share ${widget.release.version} ya está disponible'
               '${widget.release.assetSizeBytes > 0 ? ' · ${_formatBytes(widget.release.assetSizeBytes)}' : ''}.',
             ),
-            if (notes.isNotEmpty) ...[
+            if (highlights.isNotEmpty) ...[
               const SizedBox(height: 12),
-              ...notes.map(
-                (line) => Padding(
-                  padding: const EdgeInsets.only(bottom: 4),
-                  child: Text('•  $line', style: mutedStyle),
+              ...highlights.map(
+                (highlight) => Padding(
+                  padding: const EdgeInsets.only(bottom: 7),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(
+                        Icons.check_circle_outline,
+                        size: 17,
+                        color: theme.colorScheme.primary,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(child: Text(highlight, style: mutedStyle)),
+                    ],
+                  ),
                 ),
               ),
             ],
@@ -205,18 +217,29 @@ class _UpdateDialogState extends State<UpdateDialog> {
     }
   }
 
-  List<String> _notesLines(String notes) {
-    return notes
-        .split(RegExp(r'\r?\n'))
-        .map((line) => line.replaceFirst(RegExp(r'^\s*[-*]\s+'), '').trim())
-        .where(
-          (line) =>
-              line.isNotEmpty &&
-              !RegExp(r'[0-9a-fA-F]{64}').hasMatch(line) &&
-              !RegExp(r'^sha-?256', caseSensitive: false).hasMatch(line),
-        )
-        .take(6)
-        .toList(growable: false);
+  List<String> _highlights(String notes) {
+    var inAssets = false;
+    final highlights = <String>[];
+    for (final rawLine in notes.split(RegExp(r'\r?\n'))) {
+      final line = rawLine.trim();
+      final heading = RegExp(r'^#{1,6}\s+(.+)$').firstMatch(line);
+      if (heading != null) {
+        inAssets = heading.group(1)!.trim().toLowerCase() == 'archivos';
+        continue;
+      }
+      if (inAssets || !RegExp(r'^[-*]\s+').hasMatch(line)) continue;
+      final cleaned = line
+          .replaceFirst(RegExp(r'^[-*]\s+'), '')
+          .replaceAll(RegExp(r'[`*_#]'), '')
+          .replaceAll(RegExp(r'\s+'), ' ')
+          .trim();
+      if (cleaned.isEmpty || RegExp(r'[0-9a-fA-F]{64}').hasMatch(cleaned)) {
+        continue;
+      }
+      highlights.add(cleaned);
+      if (highlights.length == 3) break;
+    }
+    return highlights;
   }
 
   String _formatBytes(int bytes) {

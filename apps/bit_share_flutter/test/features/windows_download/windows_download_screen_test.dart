@@ -10,7 +10,6 @@ void main() {
   ) async {
     await tester.binding.setSurfaceSize(const Size(1200, 900));
     addTearDown(() => tester.binding.setSurfaceSize(null));
-    String? copiedText;
     tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
       SystemChannels.platform,
       (call) async {
@@ -18,10 +17,6 @@ void main() {
           return <String, dynamic>{
             'text': 'https://www.youtube.com/watch?v=example',
           };
-        }
-        if (call.method == 'Clipboard.setData') {
-          copiedText =
-              (call.arguments as Map<Object?, Object?>)['text'] as String?;
         }
         return null;
       },
@@ -69,9 +64,12 @@ void main() {
       isEmpty,
     );
 
-    await tester.tap(find.byKey(const Key('windows-copy-path-button')));
+    await tester.tap(find.byKey(const Key('windows-copy-file-button')));
     await tester.pump();
-    expect(copiedText, r'C:\Users\Test\Downloads\Bit-Share\video.mp4');
+    expect(
+      backend.copiedFilePath,
+      r'C:\Users\Test\Downloads\Bit-Share\video.mp4',
+    );
   });
 
   testWidgets('solo muestra autenticación cuando el motor la solicita', (
@@ -104,6 +102,7 @@ class _FakeWindowsBackend implements WindowsDownloadBackend {
 
   final bool authenticationRequired;
   int? downloadedHeight;
+  String? copiedFilePath;
 
   @override
   String get outputDirectory => r'C:\Users\Test\Downloads\Bit-Share';
@@ -167,4 +166,9 @@ class _FakeWindowsBackend implements WindowsDownloadBackend {
 
   @override
   Future<void> openOutputDirectory() async {}
+
+  @override
+  Future<void> copyFileToClipboard(String filePath) async {
+    copiedFilePath = filePath;
+  }
 }

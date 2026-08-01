@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/services.dart';
+
 import 'windows_download_models.dart';
 
 WindowsDownloadBackend createWindowsDownloadBackend() {
@@ -19,6 +21,7 @@ class WindowsProcessDownloadBackend implements WindowsDownloadBackend {
   static const _resultPrefix = 'bitshare_result:';
   static const _progressPrefix = 'bitshare_progress:';
   static const _minimumWorkingSpace = 64 * 1024 * 1024;
+  static const _nativeChannel = MethodChannel('bitshare/windows');
 
   final String _outputDirectory;
   Process? _activeProcess;
@@ -78,8 +81,7 @@ class WindowsProcessDownloadBackend implements WindowsDownloadBackend {
     // `Start-Process -Wait` on taskkill.exe is unreliable here — it can
     // return before the tree is actually gone — so taskkill is invoked
     // directly and its own exit is what's waited on.
-    const script =
-        r'''
+    const script = r'''
 $ErrorActionPreference = 'SilentlyContinue'
 $dir = $env:BITSHARE_SESSION_PROFILE
 $matched = Get-CimInstance Win32_Process |
@@ -401,6 +403,24 @@ Get-CimInstance Win32_Process |
   }
 
   @override
+  Future<void> copyFileToClipboard(String filePath) async {
+    try {
+      final copied = await _nativeChannel.invokeMethod<bool>('copyFile', {
+        'path': filePath,
+      });
+      if (copied != true) {
+        throw const WindowsDownloadException(
+          'No se pudo copiar el archivo al portapapeles.',
+        );
+      }
+    } on PlatformException catch (error) {
+      throw WindowsDownloadException(
+        error.message ?? 'No se pudo copiar el archivo al portapapeles.',
+      );
+    }
+  }
+
+  @override
   Future<void> openLoginPage(
     String url,
     WindowsBrowserSession browserSession,
@@ -416,14 +436,10 @@ Get-CimInstance Win32_Process |
     final profile = _sessionProfilePath(browserSession);
     await Directory(profile).create(recursive: true);
     await _closeSessionBrowser(browserSession);
-    await Process.start(
-      browser,
-      [
-        ..._sessionProfileArguments(browserSession, profile),
-        uri.toString(),
-      ],
-      mode: ProcessStartMode.detached,
-    );
+    await Process.start(browser, [
+      ..._sessionProfileArguments(browserSession, profile),
+      uri.toString(),
+    ], mode: ProcessStartMode.detached);
   }
 
   List<String> _sessionProfileArguments(
@@ -431,8 +447,7 @@ Get-CimInstance Win32_Process |
     String profile,
   ) {
     return switch (browserSession) {
-      WindowsBrowserSession.edge ||
-      WindowsBrowserSession.chrome => [
+      WindowsBrowserSession.edge || WindowsBrowserSession.chrome => [
         '--user-data-dir=$profile',
         '--no-first-run',
         '--no-default-browser-check',

@@ -3,6 +3,7 @@
 
 #include <flutter/dart_project.h>
 #include <flutter/flutter_view_controller.h>
+#include <flutter/method_channel.h>
 
 #include <memory>
 
@@ -28,6 +29,11 @@ class FlutterWindow : public Win32Window {
 
   // The Flutter instance hosted by this window.
   std::unique_ptr<flutter::FlutterViewController> flutter_controller_;
+
+  // Native Windows actions that cannot be represented by Flutter's text-only
+  // clipboard API, such as placing a real file object on the clipboard.
+  std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
+      native_channel_;
 };
 
 #endif  // RUNNER_FLUTTER_WINDOW_H_

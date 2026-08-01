@@ -43,4 +43,7 @@ class _UnsupportedWindowsDownloadBackend implements WindowsDownloadBackend {
 
   @override
   Future<void> openOutputDirectory() async => _unsupported();
+
+  @override
+  Future<void> copyFileToClipboard(String filePath) async => _unsupported();
 }
