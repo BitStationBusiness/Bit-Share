@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:flutter/services.dart';
 
+import '../../core/windows_runtime.dart';
 import 'windows_download_models.dart';
 
 WindowsDownloadBackend createWindowsDownloadBackend() {
@@ -11,12 +12,7 @@ WindowsDownloadBackend createWindowsDownloadBackend() {
 }
 
 class WindowsProcessDownloadBackend implements WindowsDownloadBackend {
-  WindowsProcessDownloadBackend()
-    : _outputDirectory = _join(
-        Platform.environment['USERPROFILE'] ?? Directory.current.path,
-        'Downloads',
-        'Bit-Share',
-      );
+  WindowsProcessDownloadBackend() : _outputDirectory = windowsLibraryDirectory();
 
   static const _resultPrefix = 'bitshare_result:';
   static const _progressPrefix = 'bitshare_progress:';
@@ -25,10 +21,9 @@ class WindowsProcessDownloadBackend implements WindowsDownloadBackend {
 
   final String _outputDirectory;
   Process? _activeProcess;
-  _RuntimePaths? _runtimePaths;
 
   String _sessionRoot() {
-    return _join(
+    return joinPath(
       Platform.environment['LOCALAPPDATA'] ?? Directory.current.path,
       'Bit-Share',
     );
@@ -41,7 +36,7 @@ class WindowsProcessDownloadBackend implements WindowsDownloadBackend {
   /// Bit-Share only ever touches a profile created for it, never the
   /// user's own browsing data.
   String _sessionProfilePath(WindowsBrowserSession browserSession) {
-    return _join(_sessionRoot(), 'browser-sessions', browserSession.name);
+    return joinPath(_sessionRoot(), 'browser-sessions', browserSession.name);
   }
 
   /// Where the browser profile's cookies get exported to, once. Reading the
@@ -49,7 +44,7 @@ class WindowsProcessDownloadBackend implements WindowsDownloadBackend {
   /// is what actually makes a session reusable: later runs just read this
   /// file and neither open nor close anything.
   String _cookieFilePath(WindowsBrowserSession browserSession) {
-    return _join(_sessionRoot(), 'sessions', '${browserSession.name}.txt');
+    return joinPath(_sessionRoot(), 'sessions', '${browserSession.name}.txt');
   }
 
   /// A session saved by an earlier run — including earlier launches of the
@@ -287,7 +282,7 @@ Get-CimInstance Win32_Process |
         : height == null
         ? 'bestvideo*+bestaudio/best'
         : 'bestvideo*[height<=$height]+bestaudio/best[height<=$height]';
-    final outputTemplate = _join(
+    final outputTemplate = joinPath(
       _outputDirectory,
       '%(title).180B [%(id)s].%(ext)s',
     );
@@ -469,23 +464,23 @@ Get-CimInstance Win32_Process |
     final localAppData = Platform.environment['LOCALAPPDATA'] ?? '';
     final candidates = switch (browserSession) {
       WindowsBrowserSession.edge => [
-        _join(
+        joinPath(
           programFilesX86,
           'Microsoft',
           'Edge',
           'Application',
           'msedge.exe',
         ),
-        _join(programFiles, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+        joinPath(programFiles, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
       ],
       WindowsBrowserSession.chrome => [
-        _join(programFiles, 'Google', 'Chrome', 'Application', 'chrome.exe'),
-        _join(programFilesX86, 'Google', 'Chrome', 'Application', 'chrome.exe'),
-        _join(localAppData, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+        joinPath(programFiles, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+        joinPath(programFilesX86, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+        joinPath(localAppData, 'Google', 'Chrome', 'Application', 'chrome.exe'),
       ],
       WindowsBrowserSession.firefox => [
-        _join(programFiles, 'Mozilla Firefox', 'firefox.exe'),
-        _join(programFilesX86, 'Mozilla Firefox', 'firefox.exe'),
+        joinPath(programFiles, 'Mozilla Firefox', 'firefox.exe'),
+        joinPath(programFilesX86, 'Mozilla Firefox', 'firefox.exe'),
       ],
     };
     for (final candidate in candidates) {
@@ -496,13 +491,13 @@ Get-CimInstance Win32_Process |
       WindowsBrowserSession.chrome => 'chrome.exe',
       WindowsBrowserSession.firefox => 'firefox.exe',
     };
-    if (await _commandExists(commandName)) return commandName;
+    if (await commandExists(commandName)) return commandName;
     throw WindowsDownloadException(
       'No se encontró ${browserSession.label} en este equipo.',
     );
   }
 
-  List<String> _commonArguments(_RuntimePaths runtime) {
+  List<String> _commonArguments(WindowsRuntimePaths runtime) {
     return [
       '--ignore-config',
       '--no-playlist',
@@ -523,7 +518,7 @@ Get-CimInstance Win32_Process |
     ];
   }
 
-  Map<String, String> _processEnvironment(_RuntimePaths runtime) {
+  Map<String, String> _processEnvironment(WindowsRuntimePaths runtime) {
     final currentPath = Platform.environment['PATH'] ?? '';
     final runtimeDirectory = File(runtime.ytDlp).parent.path;
     return {
@@ -534,53 +529,11 @@ Get-CimInstance Win32_Process |
     };
   }
 
-  Future<_RuntimePaths> _resolveRuntime() async {
-    final cached = _runtimePaths;
-    if (cached != null) return cached;
-
-    final executableDirectory = File(Platform.resolvedExecutable).parent.path;
-    final candidates = <String>[
-      _join(executableDirectory, 'runtime'),
-      _join(Directory.current.path, 'windows', 'runtime'),
-      _join(Directory.current.path, 'runtime'),
-    ];
-    for (final directory in candidates) {
-      final ytDlp = File(_join(directory, 'yt-dlp.exe'));
-      final ffmpeg = File(_join(directory, 'ffmpeg.exe'));
-      if (await ytDlp.exists() && await ffmpeg.exists()) {
-        final deno = File(_join(directory, 'deno.exe'));
-        return _runtimePaths = _RuntimePaths(
-          ytDlp: ytDlp.path,
-          ffmpeg: ffmpeg.path,
-          deno: await deno.exists() ? deno.path : null,
-        );
-      }
-    }
-
-    if (await _commandExists('yt-dlp.exe') &&
-        await _commandExists('ffmpeg.exe')) {
-      return _runtimePaths = const _RuntimePaths(
-        ytDlp: 'yt-dlp.exe',
-        ffmpeg: 'ffmpeg.exe',
-      );
-    }
-    throw const WindowsDownloadException(
-      'Falta el motor multimedia de Windows. Ejecuta '
-      'tools/setup_windows_runtime.ps1 y vuelve a compilar.',
-    );
-  }
-
-  Future<bool> _commandExists(String executable) async {
+  Future<WindowsRuntimePaths> _resolveRuntime() async {
     try {
-      final result = await Process.run(
-        'where.exe',
-        [executable],
-        stdoutEncoding: utf8,
-        stderrEncoding: utf8,
-      );
-      return result.exitCode == 0;
-    } on ProcessException {
-      return false;
+      return await resolveWindowsRuntime();
+    } on WindowsRuntimeException catch (error) {
+      throw WindowsDownloadException(error.message);
     }
   }
 
@@ -755,24 +708,3 @@ Get-CimInstance Win32_Process |
   }
 }
 
-class _RuntimePaths {
-  const _RuntimePaths({required this.ytDlp, required this.ffmpeg, this.deno});
-
-  final String ytDlp;
-  final String ffmpeg;
-  final String? deno;
-}
-
-String _join(
-  String first,
-  String second, [
-  String? third,
-  String? fourth,
-  String? fifth,
-]) {
-  final separator = Platform.pathSeparator;
-  final values = [first, second, ?third, ?fourth, ?fifth];
-  return values
-      .map((value) => value.replaceAll(RegExp(r'[\\/]+$'), ''))
-      .join(separator);
-}

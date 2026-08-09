@@ -25,22 +25,45 @@ function Get-VerifiedDownload {
     # PowerShell 5.1 promotes that into a terminating NativeCommandError
     # under $ErrorActionPreference = 'Stop' — this avoids that entirely
     # rather than masking real failures, which --fail still catches.
-    & curl.exe `
-        --fail `
-        --silent `
-        --show-error `
-        --location `
-        --retry 3 `
-        --connect-timeout 20 `
-        --max-time 120 `
-        --output $Destination `
-        $Uri
-    if ($LASTEXITCODE -ne 0) {
-        throw "No se pudo descargar $Uri (curl: $LASTEXITCODE)."
-    }
-    $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $Destination).Hash.ToLowerInvariant()
-    if ($actual -ne $ExpectedSha256.ToLowerInvariant()) {
-        throw "Hash SHA-256 incorrecto para $Destination. Esperado: $ExpectedSha256. Actual: $actual."
+    #
+    # -C -: resumes from whatever --output already has on disk. Without it,
+    # a slow link that never finishes inside --max-time restarts from zero
+    # on every retry and can never accumulate enough of a large file (seen
+    # in practice: ffmpeg's ~105 MiB archive at ~95 KiB/s over a ~120s cap).
+    # The hash check must live *inside* this loop: a stale complete file
+    # left over from a previous run (e.g. yesterday's Deno build, before
+    # upstream cut a new release) resumes as "already complete" and passes
+    # curl fine, but is the wrong bytes — only re-verifying can catch that,
+    # and only deleting it lets the next attempt fetch the real thing.
+    for ($attempt = 1; $attempt -le 15; $attempt++) {
+        & curl.exe `
+            --fail `
+            --silent `
+            --show-error `
+            --location `
+            --connect-timeout 20 `
+            --max-time 120 `
+            --continue-at - `
+            --output $Destination `
+            $Uri
+        if ($LASTEXITCODE -eq 0) {
+            $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $Destination).Hash.ToLowerInvariant()
+            if ($actual -eq $ExpectedSha256.ToLowerInvariant()) { return }
+            Remove-Item -LiteralPath $Destination -Force
+            if ($attempt -eq 15) {
+                throw "Hash SHA-256 incorrecto para $Destination tras $attempt intentos."
+            }
+            continue
+        }
+        # Exit 33 is curl refusing to resume a server response it can't
+        # verify as a continuation (e.g. a redirect target); a fresh
+        # download is the only way forward from there.
+        if ($LASTEXITCODE -eq 33 -and (Test-Path -LiteralPath $Destination)) {
+            Remove-Item -LiteralPath $Destination -Force
+        }
+        if ($attempt -eq 15) {
+            throw "No se pudo descargar $Uri (curl: $LASTEXITCODE)."
+        }
     }
 }
 
@@ -61,17 +84,25 @@ Get-VerifiedDownload `
     -ExpectedSha256 $ytDlpAsset.digest.Substring(7)
 
 $ffmpegPath = Join-Path $runtimeDirectory 'ffmpeg.exe'
+$ffprobePath = Join-Path $runtimeDirectory 'ffprobe.exe'
 $ffmpegReady = $false
 $ffmpegPackage = '8.1.2-essentials_build'
-if (Test-Path -LiteralPath $ffmpegPath) {
+# ffmpeg encodes the edits and ffprobe reads the duration and frame size the
+# gallery and the editor need. They are installed and checked as one unit so a
+# runtime can never end up with mismatched versions of the two.
+if ((Test-Path -LiteralPath $ffmpegPath) -and (Test-Path -LiteralPath $ffprobePath)) {
     $ffmpegVersion = & $ffmpegPath -version 2>$null | Select-Object -First 1
-    $ffmpegReady = $LASTEXITCODE -eq 0 -and $ffmpegVersion -like 'ffmpeg version 8.1.2*'
-    if ($ffmpegVersion -like '*full_build*') {
+    $ffmpegOk = $LASTEXITCODE -eq 0 -and $ffmpegVersion -like 'ffmpeg version 8.1.2*'
+    $ffprobeVersion = & $ffprobePath -version 2>$null | Select-Object -First 1
+    $ffprobeOk = $LASTEXITCODE -eq 0 -and $ffprobeVersion -like 'ffprobe version 8.1.2*'
+    $ffmpegReady = $ffmpegOk -and $ffprobeOk
+    if ($ffmpegReady -and $ffmpegVersion -like '*full_build*') {
         $ffmpegPackage = '8.1.2-full_build'
     }
 }
 if (-not $ffmpegReady) {
     Write-Host 'Descargando FFmpeg 8.1.2 essentials...'
+    $ffmpegPackage = '8.1.2-essentials_build'
     $ffmpegArchive = Join-Path $temporaryDirectory 'ffmpeg-8.1.2-essentials_build.zip'
     Get-VerifiedDownload `
         -Uri 'https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-8.1.2-essentials_build.zip' `
@@ -82,21 +113,23 @@ if (-not $ffmpegReady) {
         Remove-Item -LiteralPath $ffmpegExpanded -Recurse -Force
     }
     Expand-Archive -LiteralPath $ffmpegArchive -DestinationPath $ffmpegExpanded
-    $ffmpegBinary = Get-ChildItem `
-        -LiteralPath $ffmpegExpanded `
-        -Recurse `
-        -File `
-        -Filter 'ffmpeg.exe' |
-        Select-Object -First 1
-    if ($null -eq $ffmpegBinary) {
-        throw 'El paquete de FFmpeg no contiene ffmpeg.exe.'
+    foreach ($tool in @('ffmpeg', 'ffprobe')) {
+        $binary = Get-ChildItem `
+            -LiteralPath $ffmpegExpanded `
+            -Recurse `
+            -File `
+            -Filter "$tool.exe" |
+            Select-Object -First 1
+        if ($null -eq $binary) {
+            throw "El paquete de FFmpeg no contiene $tool.exe."
+        }
+        Copy-Item `
+            -LiteralPath $binary.FullName `
+            -Destination (Join-Path $runtimeDirectory "$tool.exe") `
+            -Force
     }
-    Copy-Item `
-        -LiteralPath $ffmpegBinary.FullName `
-        -Destination $ffmpegPath `
-        -Force
 } else {
-    Write-Host 'FFmpeg 8.1.2 ya está preparado.'
+    Write-Host 'FFmpeg y FFprobe 8.1.2 ya están preparados.'
 }
 
 Write-Host 'Consultando la versión estable de Deno para el soporte de YouTube...'

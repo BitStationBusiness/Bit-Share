@@ -1,7 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
-import '../features/home/home_screen.dart';
+import '../features/gallery/gallery_screen.dart';
 import '../features/share_receiver/share_receiver_screen.dart';
 import '../features/update/update_gate.dart';
 import '../features/windows_download/windows_download_screen.dart';
@@ -71,7 +71,9 @@ class BitShareApp extends StatelessWidget {
       home: openedFromShare
           ? const UpdateGate(child: ShareReceiverScreen())
           : UpdateGate(
-              child: isWindows ? WindowsDownloadScreen() : const HomeScreen(),
+              child: isWindows
+                  ? WindowsDownloadScreen()
+                  : const GalleryScreen(),
             ),
     );
   }

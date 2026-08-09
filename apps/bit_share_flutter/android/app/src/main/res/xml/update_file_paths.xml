@@ -1,7 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Exposes only context.cacheDir/update (see BitSharePlugin.updateCacheDir)
-     through the FileProvider used to hand the downloaded APK to the system
-     installer. Nothing else in the app's storage is reachable through it. -->
+<!-- Exposes context.cacheDir/update (see BitSharePlugin.updateCacheDir) to
+     hand the downloaded APK to the system installer, and the pre-Android-10
+     fallback Downloads folder (see GalleryPlugin.legacyFilesFallback) so
+     those devices can still share a gallery item. Nothing else in the app's
+     storage is reachable through this provider. -->
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
     <cache-path name="update" path="update/" />
+    <external-files-path name="legacy_downloads" path="Download/" />
 </paths>

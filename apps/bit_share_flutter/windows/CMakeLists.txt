@@ -112,6 +112,7 @@ install(FILES "${AOT_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"
 set(BITSHARE_RUNTIME_DIR "${CMAKE_CURRENT_SOURCE_DIR}/runtime")
 if(NOT EXISTS "${BITSHARE_RUNTIME_DIR}/yt-dlp.exe"
     OR NOT EXISTS "${BITSHARE_RUNTIME_DIR}/ffmpeg.exe"
+    OR NOT EXISTS "${BITSHARE_RUNTIME_DIR}/ffprobe.exe"
     OR NOT EXISTS "${BITSHARE_RUNTIME_DIR}/deno.exe")
   message(FATAL_ERROR
     "Falta el runtime Windows de Bit-Share. Ejecuta "

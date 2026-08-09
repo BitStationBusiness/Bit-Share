@@ -1,17 +1,14 @@
 package com.bitstation.bitshare.download
 
 import android.app.Activity
-import android.content.ActivityNotFoundException
-import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ApplicationInfo
-import android.content.pm.PackageManager
 import android.os.Environment
 import android.os.StatFs
-import android.system.Os
 import android.util.Log
 import com.bitstation.bitshare.donation.DonationPromptPolicy
+import com.bitstation.bitshare.media.FfmpegTools
 import com.bitstation.bitshare.media.MediaStoreRepository
 import com.bitstation.bitshare.media.PublishedMedia
 import com.bitstation.bitshare.providers.ProviderRegistry
@@ -223,38 +220,6 @@ internal class DownloadCoordinator(
         return true
     }
 
-    /**
-     * Opens the device gallery instead of a file manager. Finished files are
-     * already published through MediaStore in the Bit-Share media albums, so
-     * gallery applications can index and present them using their own visual
-     * interface.
-     */
-    fun openLibrary(activity: Activity): Boolean {
-        val galleryIntent = Intent(Intent.ACTION_MAIN).apply {
-            addCategory(Intent.CATEGORY_APP_GALLERY)
-        }
-        return try {
-            // Do not launch a selector: on some HONOR devices the selector is
-            // incorrectly handled by Files. Resolve the APP_GALLERY activity
-            // and make it explicit so the installed visual gallery is opened.
-            val galleryActivity = appContext.packageManager.resolveActivity(
-                galleryIntent,
-                PackageManager.MATCH_DEFAULT_ONLY,
-            ) ?: return false
-            activity.startActivity(
-                galleryIntent.apply {
-                    component = ComponentName(
-                        galleryActivity.activityInfo.packageName,
-                        galleryActivity.activityInfo.name,
-                    )
-                },
-            )
-            true
-        } catch (notFound: ActivityNotFoundException) {
-            false
-        }
-    }
-
     fun share(activity: Activity, taskId: String): Boolean {
         val media = results[taskId] ?: return false
         val intent = Intent(Intent.ACTION_SEND).apply {
@@ -446,31 +411,7 @@ internal class DownloadCoordinator(
     }
 
     private fun prepareFfmpegTools(): String {
-        val toolsDirectory = File(
-            appContext.noBackupFilesDir,
-            "bitshare-media-tools",
-        ).apply { mkdirs() }
-        listOf("ffmpeg", "ffprobe").forEach { toolName ->
-            val source = File(
-                appContext.applicationInfo.nativeLibraryDir,
-                "lib$toolName.so",
-            )
-            check(source.isFile) {
-                "No se encontró $toolName en el paquete Android."
-            }
-            val target = File(toolsDirectory, toolName)
-            runCatching { Os.remove(target.absolutePath) }
-            runCatching {
-                Os.symlink(source.absolutePath, target.absolutePath)
-            }.getOrElse {
-                runCatching { Os.remove(target.absolutePath) }
-                source.copyTo(target, overwrite = true)
-                check(target.setExecutable(true, false)) {
-                    "No se pudo preparar $toolName."
-                }
-            }
-        }
-        return toolsDirectory.absolutePath
+        return FfmpegTools.prepare(appContext).absolutePath
     }
 
     private fun String?.isUsableCodec(): Boolean {

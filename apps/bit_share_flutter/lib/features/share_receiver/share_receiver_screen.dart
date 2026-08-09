@@ -7,6 +7,7 @@ import '../../core/web_url.dart' as web_url;
 import '../../domain/entities/share_payload.dart';
 import '../../platform/bitshare_channel.dart';
 import '../../platform/bitshare_events.dart';
+import '../gallery/gallery_screen.dart';
 import 'provider_login.dart';
 
 String? extractWebUrl(String? sharedText) {
@@ -228,7 +229,7 @@ class _ShareReceiverScreenState extends State<ShareReceiverScreen> {
               Expanded(
                 child: OutlinedButton.icon(
                   key: const Key('open-library-button'),
-                  onPressed: () => unawaited(_channel.openLibrary()),
+                  onPressed: () => unawaited(_openGallery()),
                   icon: const Icon(Icons.photo_library_outlined),
                   label: const Text('Galería'),
                 ),
@@ -717,6 +718,12 @@ class _ShareReceiverScreenState extends State<ShareReceiverScreen> {
     } finally {
       _donationDialogVisible = false;
     }
+  }
+
+  Future<void> _openGallery() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const GalleryScreen()),
+    );
   }
 
   void _close() {

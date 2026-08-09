@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../core/web_url.dart';
+import '../gallery/gallery_screen.dart';
 import 'windows_download_backend.dart';
 
 class WindowsDownloadScreen extends StatefulWidget {
@@ -463,10 +464,11 @@ class _WindowsDownloadScreenState extends State<WindowsDownloadScreen> {
   }
 
   Widget _buildCompletedActions(BuildContext context) {
-    final openButton = FilledButton.icon(
-      onPressed: widget.backend.openOutputDirectory,
-      icon: const Icon(Icons.folder_open_outlined, size: 17),
-      label: const Text('Mostrar en Descargas'),
+    final galleryButton = FilledButton.icon(
+      key: const Key('windows-gallery-button'),
+      onPressed: () => unawaited(_openGallery()),
+      icon: const Icon(Icons.video_library_outlined, size: 17),
+      label: const Text('Galería'),
     );
     final copyButton = OutlinedButton.icon(
       key: const Key('windows-copy-file-button'),
@@ -479,17 +481,23 @@ class _WindowsDownloadScreenState extends State<WindowsDownloadScreen> {
         if (constraints.maxWidth < 430) {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [openButton, const SizedBox(height: 8), copyButton],
+            children: [galleryButton, const SizedBox(height: 8), copyButton],
           );
         }
         return Row(
           children: [
-            Expanded(child: openButton),
+            Expanded(child: galleryButton),
             const SizedBox(width: 10),
             Expanded(child: copyButton),
           ],
         );
       },
+    );
+  }
+
+  Future<void> _openGallery() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const GalleryScreen()),
     );
   }
 
