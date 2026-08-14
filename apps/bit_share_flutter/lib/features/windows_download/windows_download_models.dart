@@ -31,6 +31,7 @@ class WindowsMediaInspection {
     required this.resolutions,
     required this.availableBytes,
     this.audioEstimatedBytes,
+    this.trackCount = 1,
   });
 
   final String title;
@@ -39,6 +40,11 @@ class WindowsMediaInspection {
   final List<WindowsResolution> resolutions;
   final int availableBytes;
   final int? audioEstimatedBytes;
+
+  /// 1 for a single video/track. Higher when the link is a playlist or
+  /// album: every entry will be downloaded, and estimates above are the
+  /// total across all of them.
+  final int trackCount;
 }
 
 class WindowsDownloadProgress {
@@ -49,9 +55,12 @@ class WindowsDownloadProgress {
 }
 
 class WindowsDownloadResult {
-  const WindowsDownloadResult({required this.filePath});
+  const WindowsDownloadResult({required this.filePath, this.fileCount = 1});
 
+  /// First (or only) file written. When [fileCount] is greater than 1 the
+  /// rest live alongside it in the same output directory.
   final String filePath;
+  final int fileCount;
 }
 
 class WindowsDownloadException implements Exception {

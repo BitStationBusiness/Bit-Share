@@ -12,7 +12,8 @@ WindowsDownloadBackend createWindowsDownloadBackend() {
 }
 
 class WindowsProcessDownloadBackend implements WindowsDownloadBackend {
-  WindowsProcessDownloadBackend() : _outputDirectory = windowsLibraryDirectory();
+  WindowsProcessDownloadBackend()
+    : _outputDirectory = windowsLibraryDirectory();
 
   static const _resultPrefix = 'bitshare_result:';
   static const _progressPrefix = 'bitshare_progress:';
@@ -185,33 +186,79 @@ Get-CimInstance Win32_Process |
     }
 
     final info = Map<String, Object?>.from(decoded);
-    final formats = (info['formats'] as List? ?? const [])
-        .whereType<Map>()
-        .map((item) => Map<String, Object?>.from(item))
-        .toList(growable: false);
-    final bestAudioBytes = formats
-        .where(_isAudioOnly)
-        .map(_formatSize)
-        .whereType<int>()
-        .fold<int?>(
-          null,
-          (best, size) => best == null || size > best ? size : best,
-        );
+
+    // A playlist or album link (e.g. a YouTube Music album URL) has no
+    // top-level `formats` — the downloadable media lives one level down, in
+    // `entries`. Every entry gets downloaded, so estimates below are summed
+    // across all of them instead of read from a single track.
+    final isPlaylist = info['_type'] == 'playlist';
+    final entries = isPlaylist
+        ? (info['entries'] as List? ?? const [])
+              .whereType<Map>()
+              .map((item) => Map<String, Object?>.from(item))
+              .toList(growable: false)
+        : [info];
+    final trackCount = entries.isEmpty ? 1 : entries.length;
 
     final byHeight = <int, int?>{};
-    for (final format in formats.where(_hasVideo)) {
-      final height = (format['height'] as num?)?.toInt();
-      if (height == null || height <= 0) continue;
-      final videoBytes = _formatSize(format);
-      final includesAudio = _hasAudio(format);
-      final combinedBytes = videoBytes == null
-          ? null
-          : videoBytes + (includesAudio ? 0 : bestAudioBytes ?? 0);
-      final previous = byHeight[height];
-      if (!byHeight.containsKey(height) ||
-          (combinedBytes != null &&
-              (previous == null || combinedBytes > previous))) {
-        byHeight[height] = combinedBytes;
+    var audioAvailable = false;
+    int? totalAudioBytes;
+    var missingAudioEstimate = false;
+
+    for (final entry in entries) {
+      final formats = (entry['formats'] as List? ?? const [])
+          .whereType<Map>()
+          .map((item) => Map<String, Object?>.from(item))
+          .toList(growable: false);
+      final bestAudioBytes = formats
+          .where(_isAudioOnly)
+          .map(_formatSize)
+          .whereType<int>()
+          .fold<int?>(
+            null,
+            (best, size) => best == null || size > best ? size : best,
+          );
+
+      if (formats.any(_hasAudio)) audioAvailable = true;
+      final duration = (entry['duration'] as num?)?.toDouble();
+      final audioBitrate = formats
+          .where(_hasAudio)
+          .map((format) => (format['abr'] as num?)?.toDouble())
+          .whereType<double>()
+          .fold<double?>(
+            null,
+            (best, value) => best == null || value > best ? value : best,
+          );
+      final entryAudioEstimate =
+          bestAudioBytes ??
+          (duration != null && audioBitrate != null
+              ? (duration * audioBitrate * 1000 / 8).ceil()
+              : null);
+      if (entryAudioEstimate == null) {
+        missingAudioEstimate = true;
+      } else {
+        totalAudioBytes = (totalAudioBytes ?? 0) + entryAudioEstimate;
+      }
+
+      // Only the first entry sizes the video-resolution list: mixing
+      // playlists rarely share every height, and per-entry totals would
+      // stop meaning anything once summed against different tracks.
+      if (!identical(entry, entries.first)) continue;
+      for (final format in formats.where(_hasVideo)) {
+        final height = (format['height'] as num?)?.toInt();
+        if (height == null || height <= 0) continue;
+        final videoBytes = _formatSize(format);
+        final includesAudio = _hasAudio(format);
+        final combinedBytes = videoBytes == null
+            ? null
+            : (videoBytes + (includesAudio ? 0 : bestAudioBytes ?? 0)) *
+                  trackCount;
+        final previous = byHeight[height];
+        if (!byHeight.containsKey(height) ||
+            (combinedBytes != null &&
+                (previous == null || combinedBytes > previous))) {
+          byHeight[height] = combinedBytes;
+        }
       }
     }
 
@@ -228,33 +275,23 @@ Get-CimInstance Win32_Process |
           ..sort((left, right) => right.height.compareTo(left.height));
 
     final availableBytes = await _availableBytes();
-    final duration = (info['duration'] as num?)?.toDouble();
-    final audioBitrate = formats
-        .where(_hasAudio)
-        .map((format) => (format['abr'] as num?)?.toDouble())
-        .whereType<double>()
-        .fold<double?>(
-          null,
-          (best, value) => best == null || value > best ? value : best,
-        );
-    final audioEstimate =
-        bestAudioBytes ??
-        (duration != null && audioBitrate != null
-            ? (duration * audioBitrate * 1000 / 8).ceil()
-            : null);
+    final audioEstimate = missingAudioEstimate ? null : totalAudioBytes;
+    final rawTitle = (info['title'] as String?)?.trim();
+    final title = rawTitle?.isNotEmpty == true
+        ? rawTitle!
+        : 'Contenido multimedia';
 
     return WindowsMediaInspection(
-      title: (info['title'] as String?)?.trim().isNotEmpty == true
-          ? (info['title'] as String).trim()
-          : 'Contenido multimedia',
+      title: trackCount > 1 ? '$title ($trackCount pistas)' : title,
       providerName:
           (info['extractor_key'] as String?) ??
           (info['extractor'] as String?) ??
           'Web',
-      audioAvailable: formats.any(_hasAudio),
+      audioAvailable: audioAvailable,
       resolutions: resolutions,
       availableBytes: availableBytes,
       audioEstimatedBytes: audioEstimate,
+      trackCount: trackCount,
     );
   }
 
@@ -321,7 +358,9 @@ Get-CimInstance Win32_Process |
     );
     _activeProcess = process;
 
-    String? resultPath;
+    // A playlist/album link produces one `after_move:` line per track, not
+    // one for the whole run — every path gets kept, not just the last.
+    final resultPaths = <String>[];
     final errors = StringBuffer();
     final stdoutDone = process.stdout
         .transform(utf8.decoder)
@@ -340,7 +379,7 @@ Get-CimInstance Win32_Process |
               ),
             );
           } else if (line.startsWith(_resultPrefix)) {
-            resultPath = line.substring(_resultPrefix.length).trim();
+            resultPaths.add(line.substring(_resultPrefix.length).trim());
           }
         })
         .asFuture<void>();
@@ -359,9 +398,13 @@ Get-CimInstance Win32_Process |
         throw _failureFor(errors.toString());
       }
 
-      final resolvedPath =
-          _safeResultPath(resultPath) ??
-          await _newestOutputCreatedAfter(output, startedAt);
+      final resolvedPaths = resultPaths
+          .map(_safeResultPath)
+          .whereType<String>()
+          .toList(growable: false);
+      final resolvedPath = resolvedPaths.isNotEmpty
+          ? resolvedPaths.first
+          : await _newestOutputCreatedAfter(output, startedAt);
       if (resolvedPath == null) {
         throw const WindowsDownloadException(
           'La descarga terminó, pero no se encontró el archivo final.',
@@ -370,7 +413,10 @@ Get-CimInstance Win32_Process |
       onProgress(
         const WindowsDownloadProgress(percent: 100, stage: 'completed'),
       );
-      return WindowsDownloadResult(filePath: resolvedPath);
+      return WindowsDownloadResult(
+        filePath: resolvedPath,
+        fileCount: resolvedPaths.isEmpty ? 1 : resolvedPaths.length,
+      );
     } finally {
       if (identical(_activeProcess, process)) _activeProcess = null;
     }
@@ -471,11 +517,23 @@ Get-CimInstance Win32_Process |
           'Application',
           'msedge.exe',
         ),
-        joinPath(programFiles, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+        joinPath(
+          programFiles,
+          'Microsoft',
+          'Edge',
+          'Application',
+          'msedge.exe',
+        ),
       ],
       WindowsBrowserSession.chrome => [
         joinPath(programFiles, 'Google', 'Chrome', 'Application', 'chrome.exe'),
-        joinPath(programFilesX86, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+        joinPath(
+          programFilesX86,
+          'Google',
+          'Chrome',
+          'Application',
+          'chrome.exe',
+        ),
         joinPath(localAppData, 'Google', 'Chrome', 'Application', 'chrome.exe'),
       ],
       WindowsBrowserSession.firefox => [
@@ -707,4 +765,3 @@ Get-CimInstance Win32_Process |
     return '${(bytes / 1024).toStringAsFixed(0)} KB';
   }
 }
-

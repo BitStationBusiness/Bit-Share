@@ -31,6 +31,7 @@ class _WindowsDownloadScreenState extends State<WindowsDownloadScreen> {
   String? _status;
   String? _error;
   String? _completedPath;
+  int _completedFileCount = 1;
 
   @override
   void dispose() {
@@ -175,6 +176,7 @@ class _WindowsDownloadScreenState extends State<WindowsDownloadScreen> {
                     onOpenLogin: () => unawaited(_openLogin()),
                     onRetryAuthenticated: () =>
                         unawaited(_inspect(browserSession: _browserSession)),
+                    onRetry: () => unawaited(_retry()),
                   ),
                 ],
                 if (inspection != null) ...[
@@ -454,6 +456,17 @@ class _WindowsDownloadScreenState extends State<WindowsDownloadScreen> {
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
               ),
+              if (_completedFileCount > 1) ...[
+                const SizedBox(height: 4),
+                Text(
+                  'Y ${_completedFileCount - 1} archivo(s) más en la misma '
+                  'carpeta.',
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
               const SizedBox(height: 12),
               _buildCompletedActions(context),
             ],
@@ -496,9 +509,9 @@ class _WindowsDownloadScreenState extends State<WindowsDownloadScreen> {
   }
 
   Future<void> _openGallery() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const GalleryScreen()),
-    );
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const GalleryScreen()));
   }
 
   Future<void> _pasteFromShortcut() async {
@@ -600,6 +613,7 @@ class _WindowsDownloadScreenState extends State<WindowsDownloadScreen> {
       _urlController.clear();
       setState(() {
         _completedPath = result.filePath;
+        _completedFileCount = result.fileCount;
         _inspection = null;
         _selectedHeight = null;
         _activeBrowserSession = null;
@@ -616,6 +630,18 @@ class _WindowsDownloadScreenState extends State<WindowsDownloadScreen> {
       }
     } finally {
       if (mounted) setState(() => _downloading = false);
+    }
+  }
+
+  /// A network hiccup mid-download or mid-inspect used to strand the user
+  /// with only the paste field and no way back except retyping the link —
+  /// this replays whichever step failed, reusing what's already known about
+  /// the link instead of throwing it away.
+  Future<void> _retry() async {
+    if (_inspection != null) {
+      await _download();
+    } else {
+      await _inspect(browserSession: _activeBrowserSession);
     }
   }
 
@@ -694,6 +720,7 @@ class _ErrorPanel extends StatelessWidget {
     required this.onBrowserChanged,
     required this.onOpenLogin,
     required this.onRetryAuthenticated,
+    required this.onRetry,
   });
 
   final String message;
@@ -702,6 +729,7 @@ class _ErrorPanel extends StatelessWidget {
   final ValueChanged<WindowsBrowserSession?> onBrowserChanged;
   final VoidCallback onOpenLogin;
   final VoidCallback onRetryAuthenticated;
+  final VoidCallback onRetry;
 
   @override
   Widget build(BuildContext context) {
@@ -778,6 +806,17 @@ class _ErrorPanel extends StatelessWidget {
                 style: Theme.of(
                   context,
                 ).textTheme.bodySmall?.copyWith(fontSize: 11.5),
+              ),
+            ] else ...[
+              const SizedBox(height: 12),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: OutlinedButton.icon(
+                  key: const Key('windows-retry-button'),
+                  onPressed: onRetry,
+                  icon: const Icon(Icons.refresh, size: 16),
+                  label: const Text('Reintentar'),
+                ),
               ),
             ],
           ],

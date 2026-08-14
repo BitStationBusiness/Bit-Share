@@ -95,12 +95,55 @@ void main() {
     expect(find.byKey(const Key('windows-auth-retry-button')), findsOneWidget);
     expect(find.textContaining('no recibe tu contraseña'), findsOneWidget);
   });
+
+  testWidgets('un fallo de descarga ofrece reintentar sin re-pegar el enlace', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1200, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final backend = _FakeWindowsBackend(failDownloadsUntil: 1);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData.dark(useMaterial3: true),
+        home: WindowsDownloadScreen(backend: backend),
+      ),
+    );
+    await tester.enterText(
+      find.byKey(const Key('windows-url-field')),
+      'https://www.youtube.com/watch?v=example',
+    );
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('windows-download-button')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('No se pudo conectar con el sitio.'), findsOneWidget);
+    expect(find.byKey(const Key('windows-retry-button')), findsOneWidget);
+    // The failed attempt doesn't discard the already-known link info.
+    expect(find.text('Vídeo de prueba'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('windows-retry-button')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Descarga completada'), findsOneWidget);
+    expect(backend.downloadAttempts, 2);
+  });
 }
 
 class _FakeWindowsBackend implements WindowsDownloadBackend {
-  _FakeWindowsBackend({this.authenticationRequired = false});
+  _FakeWindowsBackend({
+    this.authenticationRequired = false,
+    this.failDownloadsUntil = 0,
+  });
 
   final bool authenticationRequired;
+
+  /// Download attempts at or below this count fail with a network-style
+  /// error; later attempts succeed. 0 means every attempt succeeds.
+  final int failDownloadsUntil;
+  int downloadAttempts = 0;
   int? downloadedHeight;
   String? copiedFilePath;
 
@@ -119,6 +162,10 @@ class _FakeWindowsBackend implements WindowsDownloadBackend {
     int? estimatedBytes,
     WindowsBrowserSession? browserSession,
   }) async {
+    downloadAttempts += 1;
+    if (downloadAttempts <= failDownloadsUntil) {
+      throw const WindowsDownloadException('No se pudo conectar con el sitio.');
+    }
     downloadedHeight = height;
     onProgress(const WindowsDownloadProgress(percent: 100, stage: 'completed'));
     return const WindowsDownloadResult(
