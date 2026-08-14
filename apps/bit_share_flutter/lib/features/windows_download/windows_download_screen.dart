@@ -158,6 +158,13 @@ class _WindowsDownloadScreenState extends State<WindowsDownloadScreen> {
                             onSubmitted: (_) => unawaited(_inspect()),
                           ),
                         ),
+                        if (_inspecting) ...[
+                          const SizedBox(height: 10),
+                          const ClipRRect(
+                            borderRadius: BorderRadius.all(Radius.circular(4)),
+                            child: LinearProgressIndicator(minHeight: 4),
+                          ),
+                        ],
                       ],
                     ),
                   ),
@@ -407,9 +414,11 @@ class _WindowsDownloadScreenState extends State<WindowsDownloadScreen> {
           children: [
             if (_downloading) ...[
               Text(
-                _status == 'processing'
-                    ? 'Procesando archivo…'
-                    : 'Descargando… ${_progress.toStringAsFixed(0)}%',
+                switch (_status) {
+                  'processing' => 'Procesando archivo…',
+                  'retrying' => 'Conexión inestable, reintentando…',
+                  _ => 'Descargando… ${_progress.toStringAsFixed(0)}%',
+                },
                 style: Theme.of(
                   context,
                 ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),

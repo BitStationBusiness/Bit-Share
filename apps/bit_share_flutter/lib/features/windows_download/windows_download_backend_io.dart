@@ -137,8 +137,40 @@ Get-CimInstance Win32_Process |
   @override
   String get outputDirectory => _outputDirectory;
 
+  /// A freshly-installed yt-dlp/ffmpeg/deno get scanned by Windows Defender
+  /// the first time each one runs, and yt-dlp fetches its JS challenge
+  /// solver from GitHub on demand — both can stall past yt-dlp's own
+  /// internal timeout on a first attempt and succeed moments later with no
+  /// change on the user's end. Retrying automatically here means the user
+  /// only ever sees a failure once every attempt below has already failed,
+  /// instead of having to notice and click "Reintentar" themselves.
+  static const _maxAttempts = 3;
+  static const _retryDelay = Duration(seconds: 2);
+
+  Future<T> _withRetry<T>(
+    Future<T> Function() attempt, {
+    void Function()? onRetrying,
+  }) async {
+    for (var attemptNumber = 1; ; attemptNumber++) {
+      try {
+        return await attempt();
+      } on WindowsDownloadException catch (error) {
+        if (!error.transient || attemptNumber >= _maxAttempts) rethrow;
+        onRetrying?.call();
+        await Future<void>.delayed(_retryDelay);
+      }
+    }
+  }
+
   @override
   Future<WindowsMediaInspection> inspect(
+    String url, {
+    WindowsBrowserSession? browserSession,
+  }) {
+    return _withRetry(() => _inspectOnce(url, browserSession: browserSession));
+  }
+
+  Future<WindowsMediaInspection> _inspectOnce(
     String url, {
     WindowsBrowserSession? browserSession,
   }) async {
@@ -303,11 +335,33 @@ Get-CimInstance Win32_Process |
     int? height,
     int? estimatedBytes,
     WindowsBrowserSession? browserSession,
-  }) async {
+  }) {
     if (_activeProcess != null) {
       throw const WindowsDownloadException('Ya hay una descarga activa.');
     }
+    return _withRetry(
+      () => _downloadOnce(
+        url,
+        mode: mode,
+        onProgress: onProgress,
+        height: height,
+        estimatedBytes: estimatedBytes,
+        browserSession: browserSession,
+      ),
+      onRetrying: () => onProgress(
+        const WindowsDownloadProgress(percent: 0, stage: 'retrying'),
+      ),
+    );
+  }
 
+  Future<WindowsDownloadResult> _downloadOnce(
+    String url, {
+    required WindowsDownloadMode mode,
+    required void Function(WindowsDownloadProgress progress) onProgress,
+    int? height,
+    int? estimatedBytes,
+    WindowsBrowserSession? browserSession,
+  }) async {
     final runtime = await _resolveRuntime();
     final output = Directory(_outputDirectory);
     await output.create(recursive: true);
@@ -716,11 +770,13 @@ Get-CimInstance Win32_Process |
         error.contains('network')) {
       return const WindowsDownloadException(
         'No se pudo conectar con el sitio. Revisa la conexión y reintenta.',
+        transient: true,
       );
     }
     return const WindowsDownloadException(
       'No se pudo descargar este contenido. Reintenta o comprueba que '
       'el enlace siga disponible.',
+      transient: true,
     );
   }
 

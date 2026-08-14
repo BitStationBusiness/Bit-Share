@@ -67,10 +67,17 @@ class WindowsDownloadException implements Exception {
   const WindowsDownloadException(
     this.message, {
     this.authenticationRequired = false,
+    this.transient = false,
   });
 
   final String message;
   final bool authenticationRequired;
+
+  /// Whether this looks like a one-off connectivity hiccup (DNS, a slow
+  /// first launch of a freshly-installed helper binary, a dropped socket)
+  /// rather than something retrying won't fix — sign-in walls, DRM, and
+  /// genuinely unsupported links are never transient.
+  final bool transient;
 
   @override
   String toString() => message;
