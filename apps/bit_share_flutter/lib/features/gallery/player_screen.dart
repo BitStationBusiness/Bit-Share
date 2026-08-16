@@ -201,7 +201,9 @@ class _MediaPlayerScreenState extends State<MediaPlayerScreen> {
       height: width / aspectRatio,
       child: ColoredBox(
         color: Colors.black,
-        child: RepaintBoundary(child: VideoPlayer(controller)),
+        // Keep the Windows GPU texture directly in the compositor so native
+        // frame notifications are not delayed by raster caching.
+        child: VideoPlayer(controller),
       ),
     );
   }

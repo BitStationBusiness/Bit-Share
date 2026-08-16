@@ -195,63 +195,12 @@ class _EditorScreenState extends State<EditorScreen> {
                       ),
                     ),
                   if (controller != null)
-                    _buildPlaybackTimeline(controller, range, request),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Recorte: '
-                    '${formatDuration(Duration(milliseconds: range.start.round()))} – '
-                    '${formatDuration(Duration(milliseconds: range.end.round()))} '
-                    '(de ${formatDuration(request.sourceDuration)})',
-                    textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.bodyMedium,
-                  ),
-                  RangeSlider(
-                    values: range,
-                    min: 0,
-                    max: request.sourceDuration.inMilliseconds.toDouble(),
-                    onChanged: _exporting
-                        ? null
-                        : (values) {
-                            setState(() => _range = values);
-                            final preview = _controller;
-                            if (preview != null &&
-                                (preview.value.position <
-                                        Duration(
-                                          milliseconds: values.start.round(),
-                                        ) ||
-                                    preview.value.position >
-                                        Duration(
-                                          milliseconds: values.end.round(),
-                                        ))) {
-                              unawaited(
-                                preview.seekTo(
-                                  Duration(milliseconds: values.start.round()),
-                                ),
-                              );
-                            }
-                          },
-                  ),
-                  const Divider(height: 28),
+                    _buildTrimTimeline(controller, range, request),
+                  const SizedBox(height: 12),
                   if (request.supportsAudioControls) ...[
                     _buildVolumeControl(context, request),
                     if (request.supportsVideoControls)
-                      SwitchListTile(
-                        contentPadding: EdgeInsets.zero,
-                        title: const Text('Silenciar vídeo'),
-                        secondary: const Icon(Icons.volume_off_outlined),
-                        value: request.mute,
-                        onChanged: _exporting
-                            ? null
-                            : (value) {
-                                setState(
-                                  () =>
-                                      _request = request.copyWith(mute: value),
-                                );
-                                _updatePreviewVolume(
-                                  value ? 0 : request.volume,
-                                );
-                              },
-                      ),
+                      _buildMuteControl(context, request),
                   ],
                   _buildSelectControls(context, request),
                 ],
@@ -293,11 +242,12 @@ class _EditorScreenState extends State<EditorScreen> {
             color: Colors.black,
             child: RotatedBox(
               quarterTurns: rotation.previewQuarterTurns,
-              child: RepaintBoundary(
-                child: AspectRatio(
-                  aspectRatio: sourceAspectRatio,
-                  child: VideoPlayer(controller),
-                ),
+              // The Windows player publishes native texture frames directly.
+              // Do not place that texture behind a repaint boundary: it can
+              // defer visual updates while the controls are being repainted.
+              child: AspectRatio(
+                aspectRatio: sourceAspectRatio,
+                child: VideoPlayer(controller),
               ),
             ),
           ),
@@ -306,7 +256,7 @@ class _EditorScreenState extends State<EditorScreen> {
     );
   }
 
-  Widget _buildPlaybackTimeline(
+  Widget _buildTrimTimeline(
     VideoPlayerController controller,
     RangeValues range,
     MediaEditRequest request,
@@ -322,13 +272,14 @@ class _EditorScreenState extends State<EditorScreen> {
             ? end
             : value.position;
         return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Row(
-              mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 IconButton(
                   tooltip: value.isPlaying ? 'Pausar' : 'Reproducir',
-                  iconSize: 42,
+                  visualDensity: VisualDensity.compact,
+                  iconSize: 34,
                   icon: Icon(
                     value.isPlaying
                         ? Icons.pause_circle_filled
@@ -349,25 +300,70 @@ class _EditorScreenState extends State<EditorScreen> {
                           );
                         },
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: 6),
                 Text(
                   '${formatDuration(position)} / '
                   '${formatDuration(request.sourceDuration)}',
                   style: Theme.of(context).textTheme.titleSmall,
                 ),
+                const Spacer(),
+                Text(
+                  '${formatDuration(start)} – ${formatDuration(end)}',
+                  style: Theme.of(context).textTheme.labelMedium,
+                ),
               ],
             ),
-            Slider(
-              value: position.inMilliseconds.toDouble(),
-              min: start.inMilliseconds.toDouble(),
-              max: end.inMilliseconds.toDouble(),
-              onChanged: _exporting
-                  ? null
-                  : (milliseconds) => unawaited(
-                      controller.seekTo(
-                        Duration(milliseconds: milliseconds.round()),
+            SizedBox(
+              height: 40,
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  RangeSlider(
+                    values: range,
+                    min: 0,
+                    max: request.sourceDuration.inMilliseconds.toDouble(),
+                    onChanged: _exporting
+                        ? null
+                        : (values) {
+                            setState(() => _range = values);
+                            final preview = _controller;
+                            if (preview != null &&
+                                (preview.value.position <
+                                        Duration(
+                                          milliseconds: values.start.round(),
+                                        ) ||
+                                    preview.value.position >
+                                        Duration(
+                                          milliseconds: values.end.round(),
+                                        ))) {
+                              unawaited(
+                                preview.seekTo(
+                                  Duration(milliseconds: values.start.round()),
+                                ),
+                              );
+                            }
+                          },
+                  ),
+                  IgnorePointer(
+                    child: SliderTheme(
+                      data: SliderTheme.of(context).copyWith(
+                        activeTrackColor: Colors.transparent,
+                        inactiveTrackColor: Colors.transparent,
+                        overlayShape: SliderComponentShape.noOverlay,
+                        thumbShape: const RoundSliderThumbShape(
+                          enabledThumbRadius: 5,
+                        ),
+                      ),
+                      child: Slider(
+                        value: position.inMilliseconds.toDouble(),
+                        min: start.inMilliseconds.toDouble(),
+                        max: end.inMilliseconds.toDouble(),
+                        onChanged: (_) {},
                       ),
                     ),
+                  ),
+                ],
+              ),
             ),
           ],
         );
@@ -382,31 +378,52 @@ class _EditorScreenState extends State<EditorScreen> {
       children: [
         Row(
           children: [
-            const Icon(Icons.volume_up_outlined),
-            const SizedBox(width: 12),
-            Expanded(child: Text('Volumen $percentage%')),
-            Text(
-              request.mute ? 'Silenciado' : '',
-              style: TextStyle(
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
+            const Icon(Icons.volume_up_outlined, size: 20),
+            const SizedBox(width: 8),
+            Text('Volumen $percentage%'),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Slider(
+                value: request.volume,
+                min: 0,
+                max: 2,
+                divisions: 20,
+                label: '$percentage%',
+                onChanged: _exporting || request.mute
+                    ? null
+                    : (value) {
+                        setState(
+                          () => _request = request.copyWith(volume: value),
+                        );
+                        _updatePreviewVolume(value);
+                      },
               ),
             ),
           ],
         ),
-        Slider(
-          value: request.volume,
-          min: 0,
-          max: 2,
-          divisions: 20,
-          label: '$percentage%',
-          onChanged: _exporting || request.mute
-              ? null
-              : (value) {
-                  setState(() => _request = request.copyWith(volume: value));
-                  _updatePreviewVolume(value);
-                },
-        ),
       ],
+    );
+  }
+
+  Widget _buildMuteControl(BuildContext context, MediaEditRequest request) {
+    return SizedBox(
+      height: 40,
+      child: Row(
+        children: [
+          const Icon(Icons.volume_off_outlined, size: 20),
+          const SizedBox(width: 8),
+          const Expanded(child: Text('Silenciar vídeo')),
+          Switch(
+            value: request.mute,
+            onChanged: _exporting
+                ? null
+                : (value) {
+                    setState(() => _request = request.copyWith(mute: value));
+                    _updatePreviewVolume(value ? 0 : request.volume);
+                  },
+          ),
+        ],
+      ),
     );
   }
 
@@ -414,12 +431,13 @@ class _EditorScreenState extends State<EditorScreen> {
     final enabled = !_exporting;
     return Column(
       children: [
-        ListTile(
-          contentPadding: EdgeInsets.zero,
-          leading: const Icon(Icons.speed_rounded),
-          title: const Text('Velocidad'),
-          trailing: DropdownButton<double>(
+        _buildCompactSelect<double>(
+          icon: Icons.speed_rounded,
+          label: 'Velocidad',
+          value: request.speed,
+          control: DropdownButton<double>(
             value: request.speed,
+            isDense: true,
             onChanged: enabled
                 ? (value) {
                     final speed = value ?? 1.0;
@@ -439,12 +457,13 @@ class _EditorScreenState extends State<EditorScreen> {
           ),
         ),
         if (request.supportsVideoControls) ...[
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: const Icon(Icons.rotate_right_rounded),
-            title: const Text('Rotación'),
-            trailing: DropdownButton<EditorRotation>(
+          _buildCompactSelect<EditorRotation>(
+            icon: Icons.rotate_right_rounded,
+            label: 'Rotación',
+            value: request.rotation,
+            control: DropdownButton<EditorRotation>(
               value: request.rotation,
+              isDense: true,
               onChanged: enabled
                   ? (value) => setState(
                       () => _request = request.copyWith(
@@ -462,12 +481,13 @@ class _EditorScreenState extends State<EditorScreen> {
                   .toList(growable: false),
             ),
           ),
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: const Icon(Icons.high_quality_outlined),
-            title: const Text('Calidad de salida'),
-            trailing: DropdownButton<EditorQuality>(
+          _buildCompactSelect<EditorQuality>(
+            icon: Icons.high_quality_outlined,
+            label: 'Calidad de salida',
+            value: request.quality,
+            control: DropdownButton<EditorQuality>(
               value: request.quality,
+              isDense: true,
               onChanged: enabled
                   ? (value) => setState(
                       () => _request = request.copyWith(
@@ -487,6 +507,25 @@ class _EditorScreenState extends State<EditorScreen> {
           ),
         ],
       ],
+    );
+  }
+
+  Widget _buildCompactSelect<T>({
+    required IconData icon,
+    required String label,
+    required T value,
+    required Widget control,
+  }) {
+    return SizedBox(
+      height: 40,
+      child: Row(
+        children: [
+          Icon(icon, size: 20),
+          const SizedBox(width: 8),
+          Expanded(child: Text(label)),
+          control,
+        ],
+      ),
     );
   }
 
