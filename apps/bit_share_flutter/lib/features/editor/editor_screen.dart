@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
@@ -90,6 +91,7 @@ class _EditorScreenState extends State<EditorScreen> {
         return;
       }
       controller.addListener(_keepPreviewInsideSelection);
+      await controller.setLooping(false);
       setState(() => _controller = controller);
     } catch (_) {
       await controller.dispose();
@@ -161,73 +163,100 @@ class _EditorScreenState extends State<EditorScreen> {
     return Column(
       children: [
         Expanded(
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-            children: [
-              if (request.source.kind == MediaKind.video)
-                if (controller != null && controller.value.isInitialized)
-                  _buildVideoPreview(controller)
-                else
-                  _PreviewFallback(message: _previewError)
-              else
-                const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 32),
-                  child: Icon(
-                    Icons.audiotrack_rounded,
-                    size: 88,
-                    color: Colors.white38,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              // A portrait clip must not grow taller than the window. The
+              // rest of the editor remains reachable by scrolling on both a
+              // compact Windows window and a small Android handset.
+              final previewHeight = math.min(
+                320.0,
+                math.max(176.0, constraints.maxHeight * .42),
+              );
+              return ListView(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                children: [
+                  if (request.source.kind == MediaKind.video)
+                    if (controller != null && controller.value.isInitialized)
+                      _buildVideoPreview(
+                        context,
+                        controller,
+                        request.rotation,
+                        previewHeight,
+                      )
+                    else
+                      _PreviewFallback(message: _previewError)
+                  else
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 32),
+                      child: Icon(
+                        Icons.audiotrack_rounded,
+                        size: 88,
+                        color: Colors.white38,
+                      ),
+                    ),
+                  if (controller != null)
+                    _buildPlaybackTimeline(controller, range, request),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Recorte: '
+                    '${formatDuration(Duration(milliseconds: range.start.round()))} – '
+                    '${formatDuration(Duration(milliseconds: range.end.round()))} '
+                    '(de ${formatDuration(request.sourceDuration)})',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.bodyMedium,
                   ),
-                ),
-              if (controller != null) _buildPlaybackButton(controller, range),
-              const SizedBox(height: 4),
-              Text(
-                '${formatDuration(Duration(milliseconds: range.start.round()))} – '
-                '${formatDuration(Duration(milliseconds: range.end.round()))} '
-                '(de ${formatDuration(request.sourceDuration)})',
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.bodyMedium,
-              ),
-              RangeSlider(
-                values: range,
-                min: 0,
-                max: request.sourceDuration.inMilliseconds.toDouble(),
-                onChanged: _exporting
-                    ? null
-                    : (values) {
-                        setState(() => _range = values);
-                        final preview = _controller;
-                        if (preview != null &&
-                            preview.value.position >
-                                Duration(milliseconds: values.end.round())) {
-                          unawaited(
-                            preview.seekTo(
-                              Duration(milliseconds: values.start.round()),
-                            ),
-                          );
-                        }
-                      },
-              ),
-              const Divider(height: 28),
-              if (request.supportsAudioControls) ...[
-                _buildVolumeControl(context, request),
-                if (request.supportsVideoControls)
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('Silenciar vídeo'),
-                    secondary: const Icon(Icons.volume_off_outlined),
-                    value: request.mute,
+                  RangeSlider(
+                    values: range,
+                    min: 0,
+                    max: request.sourceDuration.inMilliseconds.toDouble(),
                     onChanged: _exporting
                         ? null
-                        : (value) {
-                            setState(
-                              () => _request = request.copyWith(mute: value),
-                            );
-                            _updatePreviewVolume(value ? 0 : request.volume);
+                        : (values) {
+                            setState(() => _range = values);
+                            final preview = _controller;
+                            if (preview != null &&
+                                (preview.value.position <
+                                        Duration(
+                                          milliseconds: values.start.round(),
+                                        ) ||
+                                    preview.value.position >
+                                        Duration(
+                                          milliseconds: values.end.round(),
+                                        ))) {
+                              unawaited(
+                                preview.seekTo(
+                                  Duration(milliseconds: values.start.round()),
+                                ),
+                              );
+                            }
                           },
                   ),
-              ],
-              _buildSelectControls(context, request),
-            ],
+                  const Divider(height: 28),
+                  if (request.supportsAudioControls) ...[
+                    _buildVolumeControl(context, request),
+                    if (request.supportsVideoControls)
+                      SwitchListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('Silenciar vídeo'),
+                        secondary: const Icon(Icons.volume_off_outlined),
+                        value: request.mute,
+                        onChanged: _exporting
+                            ? null
+                            : (value) {
+                                setState(
+                                  () =>
+                                      _request = request.copyWith(mute: value),
+                                );
+                                _updatePreviewVolume(
+                                  value ? 0 : request.volume,
+                                );
+                              },
+                      ),
+                  ],
+                  _buildSelectControls(context, request),
+                ],
+              );
+            },
           ),
         ),
         _buildExportBar(context),
@@ -235,54 +264,114 @@ class _EditorScreenState extends State<EditorScreen> {
     );
   }
 
-  Widget _buildVideoPreview(VideoPlayerController controller) {
+  Widget _buildVideoPreview(
+    BuildContext context,
+    VideoPlayerController controller,
+    EditorRotation rotation,
+    double maxHeight,
+  ) {
     final rawAspectRatio = controller.value.aspectRatio;
-    final aspectRatio =
+    final sourceAspectRatio =
         rawAspectRatio.isFinite && rawAspectRatio >= 0.2 && rawAspectRatio <= 5
         ? rawAspectRatio
         : 16 / 9;
-    return AspectRatio(
-      aspectRatio: aspectRatio,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(12),
-        child: VideoPlayer(controller),
+    final displayAspectRatio = rotation.swapsAxes
+        ? 1 / sourceAspectRatio
+        : sourceAspectRatio;
+    final availableWidth = MediaQuery.sizeOf(context).width - 32;
+    final previewWidth = math.min(
+      availableWidth,
+      maxHeight * displayAspectRatio,
+    );
+    return Center(
+      child: SizedBox(
+        width: previewWidth,
+        height: previewWidth / displayAspectRatio,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: ColoredBox(
+            color: Colors.black,
+            child: RotatedBox(
+              quarterTurns: rotation.previewQuarterTurns,
+              child: RepaintBoundary(
+                child: AspectRatio(
+                  aspectRatio: sourceAspectRatio,
+                  child: VideoPlayer(controller),
+                ),
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
 
-  Widget _buildPlaybackButton(
+  Widget _buildPlaybackTimeline(
     VideoPlayerController controller,
     RangeValues range,
+    MediaEditRequest request,
   ) {
-    return Center(
-      child: ValueListenableBuilder<VideoPlayerValue>(
-        valueListenable: controller,
-        builder: (context, value, _) => IconButton(
-          iconSize: 42,
-          icon: Icon(
-            value.isPlaying
-                ? Icons.pause_circle_filled
-                : Icons.play_circle_filled,
-          ),
-          onPressed: _exporting
-              ? null
-              : () {
-                  if (value.isPlaying) {
-                    unawaited(controller.pause());
-                    return;
-                  }
-                  final start = Duration(milliseconds: range.start.round());
-                  final end = Duration(milliseconds: range.end.round());
-                  final position = controller.value.position;
-                  unawaited(
-                    (position < start || position >= end
-                            ? controller.seekTo(start)
-                            : Future<void>.value())
-                        .then((_) => controller.play()),
-                  );
-                },
-        ),
-      ),
+    return ValueListenableBuilder<VideoPlayerValue>(
+      valueListenable: controller,
+      builder: (context, value, _) {
+        final start = Duration(milliseconds: range.start.round());
+        final end = Duration(milliseconds: range.end.round());
+        final position = value.position < start
+            ? start
+            : value.position > end
+            ? end
+            : value.position;
+        return Column(
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                IconButton(
+                  tooltip: value.isPlaying ? 'Pausar' : 'Reproducir',
+                  iconSize: 42,
+                  icon: Icon(
+                    value.isPlaying
+                        ? Icons.pause_circle_filled
+                        : Icons.play_circle_filled,
+                  ),
+                  onPressed: _exporting
+                      ? null
+                      : () {
+                          if (value.isPlaying) {
+                            unawaited(controller.pause());
+                            return;
+                          }
+                          unawaited(
+                            (position >= end
+                                    ? controller.seekTo(start)
+                                    : Future<void>.value())
+                                .then((_) => controller.play()),
+                          );
+                        },
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  '${formatDuration(position)} / '
+                  '${formatDuration(request.sourceDuration)}',
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
+              ],
+            ),
+            Slider(
+              value: position.inMilliseconds.toDouble(),
+              min: start.inMilliseconds.toDouble(),
+              max: end.inMilliseconds.toDouble(),
+              onChanged: _exporting
+                  ? null
+                  : (milliseconds) => unawaited(
+                      controller.seekTo(
+                        Duration(milliseconds: milliseconds.round()),
+                      ),
+                    ),
+            ),
+          ],
+        );
+      },
     );
   }
 
@@ -332,9 +421,14 @@ class _EditorScreenState extends State<EditorScreen> {
           trailing: DropdownButton<double>(
             value: request.speed,
             onChanged: enabled
-                ? (value) => setState(
-                    () => _request = request.copyWith(speed: value ?? 1.0),
-                  )
+                ? (value) {
+                    final speed = value ?? 1.0;
+                    setState(() => _request = request.copyWith(speed: speed));
+                    final controller = _controller;
+                    if (controller != null) {
+                      unawaited(controller.setPlaybackSpeed(speed));
+                    }
+                  }
                 : null,
             items: editorSpeeds
                 .map(

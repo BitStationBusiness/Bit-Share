@@ -30,6 +30,15 @@ MediaEditRequest _request({
 );
 
 void main() {
+  group('EditorRotation', () {
+    test('uses the same direction in the preview and final render', () {
+      expect(EditorRotation.none.previewQuarterTurns, 0);
+      expect(EditorRotation.clockwise.previewQuarterTurns, 1);
+      expect(EditorRotation.half.previewQuarterTurns, 2);
+      expect(EditorRotation.counterClockwise.previewQuarterTurns, 3);
+    });
+  });
+
   group('buildFfmpegEditPlan', () {
     test('applies gain to an audio export', () {
       final plan = buildFfmpegEditPlan(

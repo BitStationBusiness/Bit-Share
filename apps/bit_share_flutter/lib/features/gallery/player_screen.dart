@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
@@ -100,11 +101,26 @@ class _MediaPlayerScreenState extends State<MediaPlayerScreen> {
           ),
         ],
       ),
-      body: Center(child: _buildBody(context, item)),
+      body: SafeArea(
+        child: LayoutBuilder(
+          builder: (context, constraints) => SingleChildScrollView(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minHeight: constraints.maxHeight),
+              child: Center(
+                child: _buildBody(context, item, constraints.maxHeight),
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 
-  Widget _buildBody(BuildContext context, MediaItem item) {
+  Widget _buildBody(
+    BuildContext context,
+    MediaItem item,
+    double availableHeight,
+  ) {
     if (item.kind == MediaKind.image) {
       final path = _imagePath;
       if (path == null) return const CircularProgressIndicator();
@@ -130,12 +146,7 @@ class _MediaPlayerScreenState extends State<MediaPlayerScreen> {
             mainAxisSize: MainAxisSize.min,
             children: [
               if (item.kind == MediaKind.video)
-                AspectRatio(
-                  aspectRatio: controller.value.aspectRatio == 0
-                      ? 16 / 9
-                      : controller.value.aspectRatio,
-                  child: VideoPlayer(controller),
-                )
+                _buildVideoPreview(context, controller, availableHeight)
               else
                 const Padding(
                   padding: EdgeInsets.symmetric(vertical: 48),
@@ -169,6 +180,29 @@ class _MediaPlayerScreenState extends State<MediaPlayerScreen> {
           ),
         );
       },
+    );
+  }
+
+  Widget _buildVideoPreview(
+    BuildContext context,
+    VideoPlayerController controller,
+    double availableHeight,
+  ) {
+    final rawAspectRatio = controller.value.aspectRatio;
+    final aspectRatio =
+        rawAspectRatio.isFinite && rawAspectRatio >= .2 && rawAspectRatio <= 5
+        ? rawAspectRatio
+        : 16 / 9;
+    final maxHeight = math.min(availableHeight * .58, 480.0);
+    final maxWidth = MediaQuery.sizeOf(context).width - 32;
+    final width = math.min(maxWidth, maxHeight * aspectRatio);
+    return SizedBox(
+      width: width,
+      height: width / aspectRatio,
+      child: ColoredBox(
+        color: Colors.black,
+        child: RepaintBoundary(child: VideoPlayer(controller)),
+      ),
     );
   }
 

@@ -25,6 +25,16 @@ enum EditorRotation {
   bool get swapsAxes =>
       this == EditorRotation.clockwise ||
       this == EditorRotation.counterClockwise;
+
+  /// The equivalent used by Flutter's [RotatedBox]. Keeping this alongside
+  /// the export degrees makes the on-screen preview follow the exact same
+  /// direction as the final FFmpeg render.
+  int get previewQuarterTurns => switch (this) {
+    EditorRotation.none => 0,
+    EditorRotation.clockwise => 1,
+    EditorRotation.half => 2,
+    EditorRotation.counterClockwise => 3,
+  };
 }
 
 /// Output size tiers, expressed as the longest side the result may have so a
