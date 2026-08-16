@@ -89,7 +89,29 @@ bool FlutterWindow::OnCreate() {
           flutter_controller_->engine()->messenger(), "bitshare/windows",
           &flutter::StandardMethodCodec::GetInstance());
   native_channel_->SetMethodCallHandler(
-      [](const auto& call, auto result) {
+      [this](const auto& call, auto result) {
+        if (call.method_name() == "setFullscreen") {
+          const auto* arguments =
+              std::get_if<flutter::EncodableMap>(call.arguments());
+          if (arguments == nullptr) {
+            result->Error("invalid_arguments", "Falta el estado de pantalla completa.");
+            return;
+          }
+          const auto enabled_it =
+              arguments->find(flutter::EncodableValue("enabled"));
+          if (enabled_it == arguments->end()) {
+            result->Error("invalid_arguments", "Falta el estado de pantalla completa.");
+            return;
+          }
+          const auto* enabled = std::get_if<bool>(&enabled_it->second);
+          if (enabled == nullptr || !SetFullscreen(*enabled)) {
+            result->Error("fullscreen_failed",
+                          "No se pudo cambiar el modo de pantalla.");
+            return;
+          }
+          result->Success(flutter::EncodableValue(IsFullscreen()));
+          return;
+        }
         if (call.method_name() != "copyFile") {
           result->NotImplemented();
           return;

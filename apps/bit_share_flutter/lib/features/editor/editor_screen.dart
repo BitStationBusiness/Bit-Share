@@ -3,11 +3,14 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 
 import '../../core/media_formatting.dart';
+import '../../core/windows_window_controls.dart';
 import '../gallery/media_library.dart';
 import 'media_editor.dart';
+import 'preview_source.dart';
 
 /// Focused single-clip editor. It intentionally stays closer to Telegram and
 /// WhatsApp than to a desktop NLE: trim, volume, mute, speed, rotation and
@@ -38,6 +41,11 @@ class _EditorScreenState extends State<EditorScreen> {
   double _progress = 0;
   String? _error;
   String? _previewError;
+  bool _preparingPreview = false;
+  Duration? _timelineScrubPosition;
+  Timer? _timelineSeekDebounce;
+  bool _resumeAfterTimelineScrub = false;
+  bool _windowFullscreen = false;
 
   @override
   void initState() {
@@ -81,9 +89,11 @@ class _EditorScreenState extends State<EditorScreen> {
   /// FFmpeg can still trim and export formats that the Windows preview plugin
   /// cannot render, so controls are shown with a clear fallback instead.
   Future<void> _preparePreview(MediaItem item) async {
-    final controller = item.path != null
-        ? VideoPlayerController.file(File(item.path!))
-        : VideoPlayerController.contentUri(Uri.parse(item.uri));
+    if (mounted) setState(() => _preparingPreview = true);
+    final source = await prepareEditorPreview(item);
+    final controller = source.path != null
+        ? VideoPlayerController.file(File(source.path!))
+        : VideoPlayerController.contentUri(Uri.parse(source.uri));
     try {
       await controller.initialize();
       if (!mounted) {
@@ -92,11 +102,15 @@ class _EditorScreenState extends State<EditorScreen> {
       }
       controller.addListener(_keepPreviewInsideSelection);
       await controller.setLooping(false);
-      setState(() => _controller = controller);
+      setState(() {
+        _controller = controller;
+        _preparingPreview = false;
+      });
     } catch (_) {
       await controller.dispose();
       if (mounted) {
         setState(() {
+          _preparingPreview = false;
           _previewError =
               'No se pudo cargar la previsualización, pero puedes editar y exportar el archivo.';
         });
@@ -106,6 +120,7 @@ class _EditorScreenState extends State<EditorScreen> {
 
   @override
   void dispose() {
+    _timelineSeekDebounce?.cancel();
     _controller?.removeListener(_keepPreviewInsideSelection);
     _controller?.dispose();
     super.dispose();
@@ -148,18 +163,45 @@ class _EditorScreenState extends State<EditorScreen> {
           'Editar clip',
           style: Theme.of(context).textTheme.titleMedium,
         ),
+        actions: [
+          if (WindowsWindowControls.isSupported)
+            IconButton(
+              tooltip: _windowFullscreen
+                  ? 'Salir de pantalla completa (F11)'
+                  : 'Pantalla completa (F11)',
+              visualDensity: VisualDensity.compact,
+              onPressed: () => unawaited(_toggleWindowFullscreen()),
+              icon: Icon(
+                _windowFullscreen
+                    ? Icons.fullscreen_exit_rounded
+                    : Icons.fullscreen_rounded,
+                size: 20,
+              ),
+            ),
+        ],
       ),
-      body: SafeArea(
-        child: _loading
-            ? const Center(child: CircularProgressIndicator())
-            : _error != null
-            ? Center(
-                child: Text(
-                  _error!,
-                  style: TextStyle(color: Theme.of(context).colorScheme.error),
-                ),
-              )
-            : _buildEditor(context),
+      body: CallbackShortcuts(
+        bindings: {
+          const SingleActivator(LogicalKeyboardKey.f11): () =>
+              unawaited(_toggleWindowFullscreen()),
+        },
+        child: Focus(
+          autofocus: true,
+          child: SafeArea(
+            child: _loading
+                ? const Center(child: CircularProgressIndicator())
+                : _error != null
+                ? Center(
+                    child: Text(
+                      _error!,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                      ),
+                    ),
+                  )
+                : _buildEditor(context),
+          ),
+        ),
       ),
     );
   }
@@ -258,7 +300,10 @@ class _EditorScreenState extends State<EditorScreen> {
                   constraints.maxWidth,
                 );
               }
-              return _PreviewFallback(message: _previewError);
+              return _PreviewFallback(
+                message: _previewError,
+                loading: _preparingPreview,
+              );
             }
             return SizedBox(
               height: math.min(maxHeight, 180),
@@ -356,11 +401,12 @@ class _EditorScreenState extends State<EditorScreen> {
       builder: (context, value, _) {
         final start = Duration(milliseconds: range.start.round());
         final end = Duration(milliseconds: range.end.round());
-        final position = value.position < start
+        final rawPosition = _timelineScrubPosition ?? value.position;
+        final position = rawPosition < start
             ? start
-            : value.position > end
+            : rawPosition > end
             ? end
-            : value.position;
+            : rawPosition;
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -411,74 +457,69 @@ class _EditorScreenState extends State<EditorScreen> {
                 ],
               ),
             ),
-            SizedBox(
-              height: 34,
-              child: Stack(
-                alignment: Alignment.center,
-                children: [
-                  SliderTheme(
-                    data: SliderTheme.of(context).copyWith(
-                      trackHeight: 3,
-                      rangeThumbShape: const RoundRangeSliderThumbShape(
-                        enabledThumbRadius: 8,
-                      ),
-                      overlayShape: const RoundSliderOverlayShape(
-                        overlayRadius: 14,
-                      ),
-                    ),
-                    child: RangeSlider(
-                      values: range,
-                      min: 0,
-                      max: request.sourceDuration.inMilliseconds.toDouble(),
-                      onChanged: _exporting
-                          ? null
-                          : (values) {
-                              setState(() => _range = values);
-                              final preview = _controller;
-                              if (preview != null &&
-                                  (preview.value.position <
-                                          Duration(
-                                            milliseconds: values.start.round(),
-                                          ) ||
-                                      preview.value.position >
-                                          Duration(
-                                            milliseconds: values.end.round(),
-                                          ))) {
-                                unawaited(
-                                  preview.seekTo(
-                                    Duration(
-                                      milliseconds: values.start.round(),
-                                    ),
-                                  ),
-                                );
-                              }
-                            },
-                    ),
-                  ),
-                  IgnorePointer(
-                    child: SliderTheme(
-                      data: SliderTheme.of(context).copyWith(
-                        activeTrackColor: Colors.transparent,
-                        inactiveTrackColor: Colors.transparent,
-                        overlayShape: SliderComponentShape.noOverlay,
-                        thumbColor: Theme.of(context).colorScheme.onSurface,
-                        thumbShape: const _PlayheadThumbShape(),
-                      ),
-                      child: Slider(
-                        value: position.inMilliseconds.toDouble(),
-                        min: 0,
-                        max: request.sourceDuration.inMilliseconds.toDouble(),
-                        onChanged: (_) {},
-                      ),
-                    ),
-                  ),
-                ],
-              ),
+            _TrimTimelineBar(
+              durationMilliseconds: request.sourceDuration.inMilliseconds,
+              range: range,
+              positionMilliseconds: position.inMilliseconds.toDouble(),
+              enabled: !_exporting,
+              onRangeChanged: (values) => _updateTrimRange(controller, values),
+              onSeekStart: (milliseconds) =>
+                  _beginTimelineScrub(controller, milliseconds),
+              onSeek: (milliseconds) =>
+                  _updateTimelineScrub(controller, milliseconds),
+              onSeekEnd: (milliseconds) =>
+                  unawaited(_finishTimelineScrub(controller, milliseconds)),
             ),
           ],
         );
       },
     );
+  }
+
+  void _updateTrimRange(VideoPlayerController controller, RangeValues values) {
+    setState(() => _range = values);
+    final position = controller.value.position.inMilliseconds.toDouble();
+    if (position < values.start || position > values.end) {
+      final target = position < values.start ? values.start : values.end;
+      unawaited(controller.seekTo(Duration(milliseconds: target.round())));
+    }
+  }
+
+  void _beginTimelineScrub(
+    VideoPlayerController controller,
+    double milliseconds,
+  ) {
+    _resumeAfterTimelineScrub = controller.value.isPlaying;
+    if (controller.value.isPlaying) unawaited(controller.pause());
+    setState(
+      () =>
+          _timelineScrubPosition = Duration(milliseconds: milliseconds.round()),
+    );
+  }
+
+  void _updateTimelineScrub(
+    VideoPlayerController controller,
+    double milliseconds,
+  ) {
+    final position = Duration(milliseconds: milliseconds.round());
+    setState(() => _timelineScrubPosition = position);
+    _timelineSeekDebounce?.cancel();
+    _timelineSeekDebounce = Timer(
+      const Duration(milliseconds: 35),
+      () => unawaited(controller.seekTo(position)),
+    );
+  }
+
+  Future<void> _finishTimelineScrub(
+    VideoPlayerController controller,
+    double milliseconds,
+  ) async {
+    _timelineSeekDebounce?.cancel();
+    final shouldResume = _resumeAfterTimelineScrub;
+    _resumeAfterTimelineScrub = false;
+    await controller.seekTo(Duration(milliseconds: milliseconds.round()));
+    if (shouldResume) await controller.play();
+    if (mounted) setState(() => _timelineScrubPosition = null);
   }
 
   Widget _buildVolumeControl(BuildContext context, MediaEditRequest request) {
@@ -712,6 +753,23 @@ class _EditorScreenState extends State<EditorScreen> {
     unawaited(controller.setVolume(volume.clamp(0.0, 1.0).toDouble()));
   }
 
+  Future<void> _toggleWindowFullscreen() async {
+    if (!WindowsWindowControls.isSupported) return;
+    try {
+      final fullscreen = await WindowsWindowControls.setFullscreen(
+        !_windowFullscreen,
+      );
+      if (mounted) setState(() => _windowFullscreen = fullscreen);
+    } on PlatformException {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Windows no pudo cambiar a pantalla completa.'),
+        ),
+      );
+    }
+  }
+
   Future<void> _save() async {
     final request = _effectiveRequest();
     setState(() {
@@ -792,42 +850,247 @@ class _EditorSection extends StatelessWidget {
   }
 }
 
-/// Reserves the same horizontal geometry as each trim handle but paints only
-/// a small dot. This keeps the playhead exactly aligned with the RangeSlider
-/// track without visually competing with the two edit handles.
-class _PlayheadThumbShape extends SliderComponentShape {
-  const _PlayheadThumbShape();
+enum _TimelineDragTarget { start, playhead, end }
+
+/// One compact timeline owns all three interactions instead of stacking an
+/// inert playhead above a RangeSlider. The upper playhead can be dragged or
+/// the track can be clicked to seek; the two lower handles edit the cut.
+class _TrimTimelineBar extends StatefulWidget {
+  const _TrimTimelineBar({
+    required this.durationMilliseconds,
+    required this.range,
+    required this.positionMilliseconds,
+    required this.enabled,
+    required this.onRangeChanged,
+    required this.onSeekStart,
+    required this.onSeek,
+    required this.onSeekEnd,
+  });
+
+  final int durationMilliseconds;
+  final RangeValues range;
+  final double positionMilliseconds;
+  final bool enabled;
+  final ValueChanged<RangeValues> onRangeChanged;
+  final ValueChanged<double> onSeekStart;
+  final ValueChanged<double> onSeek;
+  final ValueChanged<double> onSeekEnd;
 
   @override
-  Size getPreferredSize(bool isEnabled, bool isDiscrete) => const Size(16, 16);
+  State<_TrimTimelineBar> createState() => _TrimTimelineBarState();
+}
+
+class _TrimTimelineBarState extends State<_TrimTimelineBar> {
+  _TimelineDragTarget? _target;
+  double? _lastSeekValue;
+
+  double _valueForDx(double dx, double width) {
+    final usable = math.max(1.0, width - 20);
+    final fraction = ((dx - 10) / usable).clamp(0.0, 1.0);
+    return fraction * widget.durationMilliseconds;
+  }
+
+  double _dxForValue(double value, double width) {
+    final duration = math.max(1, widget.durationMilliseconds);
+    return 10 + (value / duration).clamp(0.0, 1.0) * (width - 20);
+  }
+
+  void _startDrag(DragStartDetails details, double width) {
+    if (!widget.enabled) return;
+    final dx = details.localPosition.dx;
+    final startDx = _dxForValue(widget.range.start, width);
+    final endDx = _dxForValue(widget.range.end, width);
+    final positionDx = _dxForValue(widget.positionMilliseconds, width);
+    final startDistance = (dx - startDx).abs();
+    final endDistance = (dx - endDx).abs();
+    final playheadDistance = (dx - positionDx).abs();
+
+    // Trim handles live in the lower half; the upper half always belongs to
+    // the playhead. This removes ambiguity when playhead and start coincide.
+    if (details.localPosition.dy >= 18 &&
+        math.min(startDistance, endDistance) <= 18 &&
+        math.min(startDistance, endDistance) <= playheadDistance) {
+      _target = startDistance <= endDistance
+          ? _TimelineDragTarget.start
+          : _TimelineDragTarget.end;
+    } else {
+      _target = _TimelineDragTarget.playhead;
+      final value = _valueForDx(
+        dx,
+        width,
+      ).clamp(widget.range.start, widget.range.end);
+      _lastSeekValue = value;
+      widget.onSeekStart(value);
+    }
+  }
+
+  void _updateDrag(DragUpdateDetails details, double width) {
+    if (!widget.enabled) return;
+    final rawValue = _valueForDx(details.localPosition.dx, width);
+    switch (_target) {
+      case _TimelineDragTarget.start:
+        widget.onRangeChanged(
+          RangeValues(rawValue.clamp(0, widget.range.end), widget.range.end),
+        );
+      case _TimelineDragTarget.end:
+        widget.onRangeChanged(
+          RangeValues(
+            widget.range.start,
+            rawValue.clamp(
+              widget.range.start,
+              widget.durationMilliseconds.toDouble(),
+            ),
+          ),
+        );
+      case _TimelineDragTarget.playhead:
+        final value = rawValue.clamp(widget.range.start, widget.range.end);
+        _lastSeekValue = value;
+        widget.onSeek(value);
+      case null:
+        break;
+    }
+  }
+
+  void _endDrag(DragEndDetails details) {
+    if (_target == _TimelineDragTarget.playhead) {
+      widget.onSeekEnd(_lastSeekValue ?? widget.positionMilliseconds);
+    }
+    _target = null;
+    _lastSeekValue = null;
+  }
+
+  void _seekFromTap(TapUpDetails details, double width) {
+    if (!widget.enabled) return;
+    final value = _valueForDx(
+      details.localPosition.dx,
+      width,
+    ).clamp(widget.range.start, widget.range.end);
+    widget.onSeekStart(value);
+    widget.onSeek(value);
+    widget.onSeekEnd(value);
+  }
 
   @override
-  void paint(
-    PaintingContext context,
-    Offset center, {
-    required Animation<double> activationAnimation,
-    required Animation<double> enableAnimation,
-    required bool isDiscrete,
-    required TextPainter labelPainter,
-    required RenderBox parentBox,
-    required SliderThemeData sliderTheme,
-    required TextDirection textDirection,
-    required double value,
-    required double textScaleFactor,
-    required Size sizeWithOverflow,
-  }) {
-    context.canvas.drawCircle(
-      center,
-      3.5,
-      Paint()..color = sliderTheme.thumbColor ?? Colors.white,
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Semantics(
+      label: 'Línea de tiempo y recorte',
+      value: formatDuration(
+        Duration(milliseconds: widget.positionMilliseconds.round()),
+      ),
+      child: SizedBox(
+        height: 42,
+        child: LayoutBuilder(
+          builder: (context, constraints) => GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTapUp: (details) => _seekFromTap(details, constraints.maxWidth),
+            onHorizontalDragStart: (details) =>
+                _startDrag(details, constraints.maxWidth),
+            onHorizontalDragUpdate: (details) =>
+                _updateDrag(details, constraints.maxWidth),
+            onHorizontalDragEnd: _endDrag,
+            child: MouseRegion(
+              cursor: widget.enabled
+                  ? SystemMouseCursors.click
+                  : SystemMouseCursors.basic,
+              child: CustomPaint(
+                painter: _TrimTimelinePainter(
+                  durationMilliseconds: widget.durationMilliseconds,
+                  range: widget.range,
+                  positionMilliseconds: widget.positionMilliseconds,
+                  enabled: widget.enabled,
+                  activeColor: colors.primary,
+                  inactiveColor: colors.outlineVariant,
+                  playheadColor: colors.onSurface,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
 
+class _TrimTimelinePainter extends CustomPainter {
+  const _TrimTimelinePainter({
+    required this.durationMilliseconds,
+    required this.range,
+    required this.positionMilliseconds,
+    required this.enabled,
+    required this.activeColor,
+    required this.inactiveColor,
+    required this.playheadColor,
+  });
+
+  final int durationMilliseconds;
+  final RangeValues range;
+  final double positionMilliseconds;
+  final bool enabled;
+  final Color activeColor;
+  final Color inactiveColor;
+  final Color playheadColor;
+
+  double _x(double value, double width) {
+    final duration = math.max(1, durationMilliseconds);
+    return 10 + (value / duration).clamp(0.0, 1.0) * (width - 20);
+  }
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    const trackY = 25.0;
+    final startX = _x(range.start, size.width);
+    final endX = _x(range.end, size.width);
+    final playheadX = _x(positionMilliseconds, size.width);
+    final opacity = enabled ? 1.0 : .45;
+
+    canvas.drawLine(
+      const Offset(10, trackY),
+      Offset(size.width - 10, trackY),
+      Paint()
+        ..color = inactiveColor.withValues(alpha: .65 * opacity)
+        ..strokeWidth = 4
+        ..strokeCap = StrokeCap.round,
+    );
+    canvas.drawLine(
+      Offset(startX, trackY),
+      Offset(endX, trackY),
+      Paint()
+        ..color = activeColor.withValues(alpha: opacity)
+        ..strokeWidth = 5
+        ..strokeCap = StrokeCap.round,
+    );
+    final handlePaint = Paint()..color = activeColor.withValues(alpha: opacity);
+    canvas.drawCircle(Offset(startX, trackY), 8, handlePaint);
+    canvas.drawCircle(Offset(endX, trackY), 8, handlePaint);
+
+    final playheadPaint = Paint()
+      ..color = playheadColor.withValues(alpha: opacity)
+      ..strokeWidth = 2;
+    canvas.drawLine(
+      Offset(playheadX, 7),
+      Offset(playheadX, trackY + 8),
+      playheadPaint,
+    );
+    canvas.drawCircle(Offset(playheadX, 7), 4, playheadPaint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _TrimTimelinePainter oldDelegate) =>
+      oldDelegate.durationMilliseconds != durationMilliseconds ||
+      oldDelegate.range != range ||
+      oldDelegate.positionMilliseconds != positionMilliseconds ||
+      oldDelegate.enabled != enabled ||
+      oldDelegate.activeColor != activeColor ||
+      oldDelegate.inactiveColor != inactiveColor ||
+      oldDelegate.playheadColor != playheadColor;
+}
+
 class _PreviewFallback extends StatelessWidget {
-  const _PreviewFallback({this.message});
+  const _PreviewFallback({this.message, this.loading = false});
 
   final String? message;
+  final bool loading;
 
   @override
   Widget build(BuildContext context) {
@@ -843,7 +1106,25 @@ class _PreviewFallback extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.movie_outlined, size: 42, color: Colors.white54),
+            if (loading)
+              const SizedBox(
+                width: 28,
+                height: 28,
+                child: CircularProgressIndicator(strokeWidth: 2.5),
+              )
+            else
+              const Icon(Icons.movie_outlined, size: 42, color: Colors.white54),
+            if (loading) ...[
+              const SizedBox(height: 10),
+              Text(
+                'Preparando una vista previa fluida…',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
             if (message != null) ...[
               const SizedBox(height: 10),
               Text(

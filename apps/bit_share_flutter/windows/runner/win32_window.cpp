@@ -28,8 +28,6 @@ constexpr const wchar_t kGetPreferredBrightnessRegValue[] = L"AppsUseLightTheme"
 
 constexpr int kCompactMinWidth = 400;
 constexpr int kCompactMinHeight = 360;
-constexpr int kCompactMaxWidth = 560;
-constexpr int kCompactMaxHeight = 760;
 
 // The number of Win32Window objects that currently exist.
 static int g_active_window_count = 0;
@@ -201,8 +199,6 @@ Win32Window::MessageHandler(HWND hwnd,
       const double scale_factor = GetDpiForWindow(hwnd) / 96.0;
       min_max_info->ptMinTrackSize.x = Scale(kCompactMinWidth, scale_factor);
       min_max_info->ptMinTrackSize.y = Scale(kCompactMinHeight, scale_factor);
-      min_max_info->ptMaxTrackSize.x = Scale(kCompactMaxWidth, scale_factor);
-      min_max_info->ptMaxTrackSize.y = Scale(kCompactMaxHeight, scale_factor);
       return 0;
     }
 
@@ -280,6 +276,43 @@ RECT Win32Window::GetClientArea() {
   RECT frame;
   GetClientRect(window_handle_, &frame);
   return frame;
+}
+
+bool Win32Window::SetFullscreen(bool fullscreen) {
+  if (window_handle_ == nullptr) return false;
+  if (fullscreen == fullscreen_) return true;
+
+  if (fullscreen) {
+    windowed_placement_.length = sizeof(WINDOWPLACEMENT);
+    if (!GetWindowPlacement(window_handle_, &windowed_placement_)) return false;
+    MONITORINFO monitor_info{sizeof(MONITORINFO)};
+    if (!GetMonitorInfo(
+            MonitorFromWindow(window_handle_, MONITOR_DEFAULTTONEAREST),
+            &monitor_info)) {
+      return false;
+    }
+    const auto style = GetWindowLongPtr(window_handle_, GWL_STYLE);
+    SetWindowLongPtr(window_handle_, GWL_STYLE,
+                     style & ~static_cast<LONG_PTR>(WS_OVERLAPPEDWINDOW));
+    const RECT& bounds = monitor_info.rcMonitor;
+    SetWindowPos(window_handle_, HWND_TOP, bounds.left, bounds.top,
+                 bounds.right - bounds.left, bounds.bottom - bounds.top,
+                 SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+  } else {
+    const auto style = GetWindowLongPtr(window_handle_, GWL_STYLE);
+    SetWindowLongPtr(window_handle_, GWL_STYLE,
+                     style | static_cast<LONG_PTR>(WS_OVERLAPPEDWINDOW));
+    SetWindowPlacement(window_handle_, &windowed_placement_);
+    SetWindowPos(window_handle_, nullptr, 0, 0, 0, 0,
+                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER |
+                     SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+  }
+  fullscreen_ = fullscreen;
+  return true;
+}
+
+bool Win32Window::IsFullscreen() const {
+  return fullscreen_;
 }
 
 HWND Win32Window::GetHandle() {
