@@ -36,6 +36,7 @@ class _EditorScreenState extends State<EditorScreen> {
   bool _exporting = false;
   double _progress = 0;
   String? _error;
+  String? _previewError;
 
   @override
   void initState() {
@@ -54,14 +55,6 @@ class _EditorScreenState extends State<EditorScreen> {
         });
         return;
       }
-      if (probed.kind != MediaKind.image) {
-        final controller = probed.path != null
-            ? VideoPlayerController.file(File(probed.path!))
-            : VideoPlayerController.contentUri(Uri.parse(probed.uri));
-        _controller = controller;
-        await controller.initialize();
-        controller.addListener(_keepPreviewInsideSelection);
-      }
       if (!mounted) return;
       setState(() {
         _request = MediaEditRequest.untouched(
@@ -71,12 +64,41 @@ class _EditorScreenState extends State<EditorScreen> {
         _range = RangeValues(0, duration.inMilliseconds.toDouble());
         _loading = false;
       });
+      if (probed.kind != MediaKind.image) {
+        await _preparePreview(probed);
+      }
     } catch (_) {
       if (!mounted) return;
       setState(() {
         _loading = false;
         _error = 'No se pudo abrir el editor para este archivo.';
       });
+    }
+  }
+
+  /// A codec/player failure must never make the editor itself disappear.
+  /// FFmpeg can still trim and export formats that the Windows preview plugin
+  /// cannot render, so controls are shown with a clear fallback instead.
+  Future<void> _preparePreview(MediaItem item) async {
+    final controller = item.path != null
+        ? VideoPlayerController.file(File(item.path!))
+        : VideoPlayerController.contentUri(Uri.parse(item.uri));
+    try {
+      await controller.initialize();
+      if (!mounted) {
+        await controller.dispose();
+        return;
+      }
+      controller.addListener(_keepPreviewInsideSelection);
+      setState(() => _controller = controller);
+    } catch (_) {
+      await controller.dispose();
+      if (mounted) {
+        setState(() {
+          _previewError =
+              'No se pudo cargar la previsualización, pero puedes editar y exportar el archivo.';
+        });
+      }
     }
   }
 
@@ -142,18 +164,11 @@ class _EditorScreenState extends State<EditorScreen> {
           child: ListView(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
             children: [
-              if (request.source.kind == MediaKind.video &&
-                  controller != null &&
-                  controller.value.isInitialized)
-                AspectRatio(
-                  aspectRatio: controller.value.aspectRatio == 0
-                      ? 16 / 9
-                      : controller.value.aspectRatio,
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: VideoPlayer(controller),
-                  ),
-                )
+              if (request.source.kind == MediaKind.video)
+                if (controller != null && controller.value.isInitialized)
+                  _buildVideoPreview(controller)
+                else
+                  _PreviewFallback(message: _previewError)
               else
                 const Padding(
                   padding: EdgeInsets.symmetric(vertical: 32),
@@ -217,6 +232,21 @@ class _EditorScreenState extends State<EditorScreen> {
         ),
         _buildExportBar(context),
       ],
+    );
+  }
+
+  Widget _buildVideoPreview(VideoPlayerController controller) {
+    final rawAspectRatio = controller.value.aspectRatio;
+    final aspectRatio =
+        rawAspectRatio.isFinite && rawAspectRatio >= 0.2 && rawAspectRatio <= 5
+        ? rawAspectRatio
+        : 16 / 9;
+    return AspectRatio(
+      aspectRatio: aspectRatio,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: VideoPlayer(controller),
+      ),
     );
   }
 
@@ -439,5 +469,43 @@ class _EditorScreenState extends State<EditorScreen> {
         context,
       ).showSnackBar(SnackBar(content: Text(error.message)));
     }
+  }
+}
+
+class _PreviewFallback extends StatelessWidget {
+  const _PreviewFallback({this.message});
+
+  final String? message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 150,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.movie_outlined, size: 42, color: Colors.white54),
+            if (message != null) ...[
+              const SizedBox(height: 10),
+              Text(
+                message!,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
   }
 }

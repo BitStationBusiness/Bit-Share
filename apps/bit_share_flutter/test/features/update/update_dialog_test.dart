@@ -42,6 +42,10 @@ void main() {
     expect(find.textContaining('Bit-Share-Setup-1.0.10.exe'), findsNothing);
     expect(find.text('Más tarde'), findsOneWidget);
     expect(find.text('Actualizar ahora'), findsOneWidget);
+    expect(
+      tester.getSize(find.byKey(const Key('update-dialog-card'))).width,
+      lessThanOrEqualTo(320),
+    );
     expect(tester.takeException(), isNull);
   });
 }

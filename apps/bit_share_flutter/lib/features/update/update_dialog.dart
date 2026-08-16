@@ -30,25 +30,50 @@ class _UpdateDialogState extends State<UpdateDialog> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final actions = _buildActions(context);
     return PopScope(
       canPop: _dismissible,
-      child: AlertDialog(
-        icon: Icon(
-          _stage == _Stage.error
-              ? Icons.error_outline
-              : Icons.rocket_launch_rounded,
-          color: _stage == _Stage.error
-              ? theme.colorScheme.error
-              : theme.colorScheme.primary,
+      child: Dialog(
+        insetPadding: const EdgeInsets.symmetric(horizontal: 32, vertical: 20),
+        child: ConstrainedBox(
+          key: const Key('update-dialog-card'),
+          constraints: const BoxConstraints(maxWidth: 320),
+          child: Padding(
+            padding: const EdgeInsets.all(18),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      _stage == _Stage.error
+                          ? Icons.error_outline
+                          : Icons.rocket_launch_rounded,
+                      size: 24,
+                      color: _stage == _Stage.error
+                          ? theme.colorScheme.error
+                          : theme.colorScheme.primary,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(_title(), style: theme.textTheme.titleLarge),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                _buildBody(theme),
+                if (actions.isNotEmpty) ...[
+                  const SizedBox(height: 14),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: Wrap(spacing: 8, runSpacing: 6, children: actions),
+                  ),
+                ],
+              ],
+            ),
+          ),
         ),
-        title: Text(_title()),
-        content: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 380),
-          child: _buildBody(theme),
-        ),
-        actionsAlignment: MainAxisAlignment.end,
-        actionsPadding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
-        actions: _buildActions(context),
       ),
     );
   }
@@ -78,10 +103,10 @@ class _UpdateDialogState extends State<UpdateDialog> {
               '${widget.release.assetSizeBytes > 0 ? ' · ${_formatBytes(widget.release.assetSizeBytes)}' : ''}.',
             ),
             if (highlights.isNotEmpty) ...[
-              const SizedBox(height: 12),
+              const SizedBox(height: 8),
               ...highlights.map(
                 (highlight) => Padding(
-                  padding: const EdgeInsets.only(bottom: 7),
+                  padding: const EdgeInsets.only(bottom: 5),
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -105,7 +130,7 @@ class _UpdateDialogState extends State<UpdateDialog> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text('Descargando Bit-Share ${widget.release.version}…'),
-            const SizedBox(height: 14),
+            const SizedBox(height: 10),
             ClipRRect(
               borderRadius: BorderRadius.circular(6),
               child: LinearProgressIndicator(
@@ -113,7 +138,7 @@ class _UpdateDialogState extends State<UpdateDialog> {
                 minHeight: 6,
               ),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 6),
             Text(
               _total > 0
                   ? '${_formatBytes(_received)} / ${_formatBytes(_total)}'
