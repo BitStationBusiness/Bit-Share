@@ -10,7 +10,11 @@ import 'media_library.dart';
 /// Full-screen playback for one item from the gallery grid, and the entry
 /// point into the editor for videos and audio.
 class MediaPlayerScreen extends StatefulWidget {
-  const MediaPlayerScreen({required this.item, required this.library, super.key});
+  const MediaPlayerScreen({
+    required this.item,
+    required this.library,
+    super.key,
+  });
 
   final MediaItem item;
   final MediaLibrary library;
@@ -76,7 +80,7 @@ class _MediaPlayerScreenState extends State<MediaPlayerScreen> {
               onPressed: () => unawaited(_share()),
               icon: const Icon(Icons.share_outlined),
             ),
-          if (widget.library.canCopyToClipboard)
+          if (widget.library.canCopyToClipboard && !widget.library.canShare)
             IconButton(
               tooltip: 'Copiar archivo',
               onPressed: () => unawaited(_copyToClipboard()),
@@ -85,7 +89,8 @@ class _MediaPlayerScreenState extends State<MediaPlayerScreen> {
           if (widget.library.canRevealInFileManager)
             IconButton(
               tooltip: 'Mostrar en carpeta',
-              onPressed: () => unawaited(widget.library.revealInFileManager(item)),
+              onPressed: () =>
+                  unawaited(widget.library.revealInFileManager(item)),
               icon: const Icon(Icons.folder_open_outlined),
             ),
           IconButton(
@@ -109,7 +114,8 @@ class _MediaPlayerScreenState extends State<MediaPlayerScreen> {
       future: _initialization,
       builder: (context, snapshot) {
         final controller = _controller;
-        if (snapshot.connectionState != ConnectionState.done || controller == null) {
+        if (snapshot.connectionState != ConnectionState.done ||
+            controller == null) {
           return const CircularProgressIndicator();
         }
         if (snapshot.hasError) {
@@ -133,7 +139,11 @@ class _MediaPlayerScreenState extends State<MediaPlayerScreen> {
               else
                 const Padding(
                   padding: EdgeInsets.symmetric(vertical: 48),
-                  child: Icon(Icons.audiotrack_rounded, size: 96, color: Colors.white38),
+                  child: Icon(
+                    Icons.audiotrack_rounded,
+                    size: 96,
+                    color: Colors.white38,
+                  ),
                 ),
               const SizedBox(height: 12),
               VideoProgressIndicator(
@@ -167,18 +177,34 @@ class _MediaPlayerScreenState extends State<MediaPlayerScreen> {
     if (!mounted) return;
     final edited = await Navigator.of(context).push<bool>(
       MaterialPageRoute(
-        builder: (_) => EditorScreen(item: widget.item, library: widget.library),
+        builder: (_) =>
+            EditorScreen(item: widget.item, library: widget.library),
       ),
     );
     if (edited == true && mounted) Navigator.of(context).pop();
   }
 
   Future<void> _share() async {
-    final shared = await widget.library.share(widget.item);
-    if (!shared && mounted) {
+    try {
+      final shared = await widget.library.share(widget.item);
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No se pudo compartir el archivo.')),
+        SnackBar(
+          content: Text(
+            shared
+                ? widget.library.canCopyToClipboard
+                      ? 'Archivo listo: pégalo en WhatsApp, Telegram o la app que quieras.'
+                      : 'Elige dónde compartir el archivo.'
+                : 'No se pudo compartir el archivo.',
+          ),
+        ),
       );
+    } on MediaLibraryException catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(error.message)));
+      }
     }
   }
 

@@ -105,9 +105,8 @@ FfmpegEditPlan buildFfmpegEditPlan({
     } else if (streamCopy) {
       arguments.addAll(['-c:a', 'copy']);
     } else {
-      if (request.isSpeedAdjusted) {
-        arguments.addAll(['-af', 'atempo=${_number(request.speed)}']);
-      }
+      final audioFilter = _audioFilter(request);
+      if (audioFilter != null) arguments.addAll(['-af', audioFilter]);
       arguments.addAll(['-c:a', 'aac', '-b:a', '160k']);
     }
     arguments.addAll(['-movflags', '+faststart']);
@@ -115,9 +114,8 @@ FfmpegEditPlan buildFfmpegEditPlan({
     // Cover art rides along as a video stream; carrying it through a filtered
     // audio re-encode is what makes an edited M4A fail to mux.
     arguments.addAll(['-vn', '-map', '0:a:0']);
-    if (request.isSpeedAdjusted) {
-      arguments.addAll(['-af', 'atempo=${_number(request.speed)}']);
-    }
+    final audioFilter = _audioFilter(request);
+    if (audioFilter != null) arguments.addAll(['-af', audioFilter]);
     if (editOutputExtension(request) == 'mp3') {
       arguments.addAll(['-c:a', 'libmp3lame', '-q:a', '2']);
     } else {
@@ -142,7 +140,22 @@ bool _canStreamCopy(MediaEditRequest request) {
       !request.isTrimmed &&
       !request.isRotated &&
       !request.isSpeedAdjusted &&
+      !request.isVolumeAdjusted &&
       !request.isRescaled;
+}
+
+/// Joins audio transforms in one chain. This matters for a clip where the
+/// user adjusts both speed and volume: setting `-af` twice would silently
+/// discard the first filter.
+String? _audioFilter(MediaEditRequest request) {
+  final filters = <String>[];
+  if (request.isSpeedAdjusted) {
+    filters.add('atempo=${_number(request.speed)}');
+  }
+  if (request.isVolumeAdjusted) {
+    filters.add('volume=${_number(request.volume)}');
+  }
+  return filters.isEmpty ? null : filters.join(',');
 }
 
 /// Scale runs before transpose, so its target is the pre-rotation size;

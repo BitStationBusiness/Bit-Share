@@ -537,6 +537,8 @@ class GalleryPlugin :
         val endMs = (arguments["endMs"] as? Number)?.toLong() ?: 0L
         val sourceDurationMs = (arguments["sourceDurationMs"] as? Number)?.toLong() ?: 0L
         val mute = arguments["mute"] as? Boolean ?: false
+        val volume = ((arguments["volume"] as? Number)?.toDouble() ?: 1.0)
+            .coerceIn(0.0, 2.0)
         val rotationDegrees = (arguments["rotationDegrees"] as? Number)?.toInt() ?: 0
         val speed = (arguments["speed"] as? Number)?.toDouble() ?: 1.0
         val longestSide = (arguments["longestSide"] as? Number)?.toInt()
@@ -595,6 +597,7 @@ class GalleryPlugin :
                 endMs = endMs,
                 sourceDurationMs = sourceDurationMs,
                 mute = mute,
+                volume = volume,
                 rotationDegrees = rotationDegrees,
                 speed = speed,
                 longestSide = longestSide,
@@ -681,6 +684,7 @@ class GalleryPlugin :
         endMs: Long,
         sourceDurationMs: Long,
         mute: Boolean,
+        volume: Double,
         rotationDegrees: Int,
         speed: Double,
         longestSide: Int?,
@@ -700,10 +704,11 @@ class GalleryPlugin :
         val isTrimmed = clampedStart > 40L || (sourceDurationMs - clampedEnd) > 40L
         val isRotated = rotationDegrees != 0
         val isSpeedAdjusted = speed != 1.0
+        val isVolumeAdjusted = volume != 1.0
         val scaled = scaledSize(width, height, longestSide)
         val isRescaled = scaled != null
         val streamCopy = isVideo && mute && !isTrimmed && !isRotated &&
-            !isSpeedAdjusted && !isRescaled
+            !isSpeedAdjusted && !isVolumeAdjusted && !isRescaled
 
         val arguments = mutableListOf(
             "-hide_banner", "-nostdin", "-loglevel", "error", "-y",
@@ -733,13 +738,15 @@ class GalleryPlugin :
             } else if (streamCopy) {
                 arguments += listOf("-c:a", "copy")
             } else {
-                if (isSpeedAdjusted) arguments += listOf("-af", "atempo=${formatNumber(speed)}")
+                val audioFilter = audioFilter(isSpeedAdjusted, speed, isVolumeAdjusted, volume)
+                if (audioFilter != null) arguments += listOf("-af", audioFilter)
                 arguments += listOf("-c:a", "aac", "-b:a", "160k")
             }
             arguments += listOf("-movflags", "+faststart")
         } else {
             arguments += listOf("-vn", "-map", "0:a:0")
-            if (isSpeedAdjusted) arguments += listOf("-af", "atempo=${formatNumber(speed)}")
+            val audioFilter = audioFilter(isSpeedAdjusted, speed, isVolumeAdjusted, volume)
+            if (audioFilter != null) arguments += listOf("-af", audioFilter)
             if (outputExtension == "mp3") {
                 arguments += listOf("-c:a", "libmp3lame", "-q:a", "2")
             } else {
@@ -784,6 +791,20 @@ class GalleryPlugin :
         }
         if (isSpeedAdjusted) filters += "setpts=PTS/${formatNumber(speed)}"
         return filters
+    }
+
+    /** Keep the Android plan byte-for-byte equivalent in intent to Dart's
+     * `buildFfmpegEditPlan`: one -af chain preserves both speed and volume. */
+    private fun audioFilter(
+        isSpeedAdjusted: Boolean,
+        speed: Double,
+        isVolumeAdjusted: Boolean,
+        volume: Double,
+    ): String? {
+        val filters = mutableListOf<String>()
+        if (isSpeedAdjusted) filters += "atempo=${formatNumber(speed)}"
+        if (isVolumeAdjusted) filters += "volume=${formatNumber(volume)}"
+        return filters.takeIf { it.isNotEmpty() }?.joinToString(",")
     }
 
     private fun formatNumber(value: Double): String {

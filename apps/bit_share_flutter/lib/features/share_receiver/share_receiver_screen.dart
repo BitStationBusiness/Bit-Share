@@ -7,7 +7,9 @@ import '../../core/web_url.dart' as web_url;
 import '../../domain/entities/share_payload.dart';
 import '../../platform/bitshare_channel.dart';
 import '../../platform/bitshare_events.dart';
+import '../editor/editor_screen.dart';
 import '../gallery/gallery_screen.dart';
+import '../gallery/media_library.dart';
 import 'provider_login.dart';
 
 String? extractWebUrl(String? sharedText) {
@@ -224,6 +226,13 @@ class _ShareReceiverScreenState extends State<ShareReceiverScreen> {
             message: 'Descarga completada.',
           ),
           const SizedBox(height: 12),
+          FilledButton.icon(
+            key: const Key('edit-result-button'),
+            onPressed: () => unawaited(_editCompleted(completed)),
+            icon: const Icon(Icons.content_cut_rounded),
+            label: const Text('Editar descarga'),
+          ),
+          const SizedBox(height: 10),
           Row(
             children: [
               Expanded(
@@ -721,8 +730,28 @@ class _ShareReceiverScreenState extends State<ShareReceiverScreen> {
   }
 
   Future<void> _openGallery() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const GalleryScreen()),
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const GalleryScreen()));
+  }
+
+  Future<void> _editCompleted(TaskCompletedEvent completed) async {
+    final item = MediaItem(
+      id: completed.contentUri,
+      uri: completed.contentUri,
+      name: completed.fileName,
+      mimeType: completed.mimeType,
+      kind: MediaKind.resolve(
+        mimeType: completed.mimeType,
+        name: completed.fileName,
+      ),
+      sizeBytes: 0,
+    );
+    if (!item.isEditable) return;
+    await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => EditorScreen(item: item, library: createMediaLibrary()),
+      ),
     );
   }
 

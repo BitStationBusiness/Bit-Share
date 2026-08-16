@@ -47,19 +47,18 @@ class AndroidMediaEditor implements MediaEditor {
       if (progress != null) onProgress(progress.clamp(0, 1));
     }, onError: (Object _) {});
     try {
-      final response = await _methods.invokeMapMethod<Object?, Object?>(
-        'export',
-        {
-          'id': request.source.id,
-          'startMs': request.start.inMilliseconds,
-          'endMs': request.end.inMilliseconds,
-          'sourceDurationMs': request.sourceDuration.inMilliseconds,
-          'mute': request.mute,
-          'rotationDegrees': request.rotation.degrees,
-          'speed': request.speed,
-          'longestSide': request.quality.longestSide,
-        },
-      );
+      final response = await _methods
+          .invokeMapMethod<Object?, Object?>('export', {
+            'id': request.source.id,
+            'startMs': request.start.inMilliseconds,
+            'endMs': request.end.inMilliseconds,
+            'sourceDurationMs': request.sourceDuration.inMilliseconds,
+            'mute': request.mute,
+            'volume': request.volume,
+            'rotationDegrees': request.rotation.degrees,
+            'speed': request.speed,
+            'longestSide': request.quality.longestSide,
+          });
       if (response == null) {
         throw const MediaEditException('El editor no devolvió un archivo.');
       }

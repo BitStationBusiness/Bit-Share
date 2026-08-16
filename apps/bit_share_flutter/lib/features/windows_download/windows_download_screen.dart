@@ -4,7 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../core/web_url.dart';
+import '../editor/editor_screen.dart';
 import '../gallery/gallery_screen.dart';
+import '../gallery/media_library.dart';
 import 'windows_download_backend.dart';
 
 class WindowsDownloadScreen extends StatefulWidget {
@@ -492,25 +494,39 @@ class _WindowsDownloadScreenState extends State<WindowsDownloadScreen> {
       icon: const Icon(Icons.video_library_outlined, size: 17),
       label: const Text('Galería'),
     );
-    final copyButton = OutlinedButton.icon(
+    final editButton = OutlinedButton.icon(
+      key: const Key('windows-edit-result-button'),
+      onPressed: () => unawaited(_editCompletedFile()),
+      icon: const Icon(Icons.content_cut_rounded, size: 17),
+      label: const Text('Editar'),
+    );
+    final shareButton = OutlinedButton.icon(
       key: const Key('windows-copy-file-button'),
-      onPressed: () => unawaited(_copyCompletedFile()),
-      icon: const Icon(Icons.content_copy_outlined, size: 17),
-      label: const Text('Copiar archivo'),
+      onPressed: () => unawaited(_shareCompletedFile()),
+      icon: const Icon(Icons.share_outlined, size: 17),
+      label: const Text('Compartir'),
     );
     return LayoutBuilder(
       builder: (context, constraints) {
-        if (constraints.maxWidth < 430) {
+        if (constraints.maxWidth < 600) {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [galleryButton, const SizedBox(height: 8), copyButton],
+            children: [
+              galleryButton,
+              const SizedBox(height: 8),
+              editButton,
+              const SizedBox(height: 8),
+              shareButton,
+            ],
           );
         }
         return Row(
           children: [
             Expanded(child: galleryButton),
             const SizedBox(width: 10),
-            Expanded(child: copyButton),
+            Expanded(child: editButton),
+            const SizedBox(width: 10),
+            Expanded(child: shareButton),
           ],
         );
       },
@@ -669,6 +685,39 @@ class _WindowsDownloadScreenState extends State<WindowsDownloadScreen> {
         context,
       ).showSnackBar(SnackBar(content: Text(error.message)));
     }
+  }
+
+  Future<void> _shareCompletedFile() async {
+    await _copyCompletedFile();
+    if (!mounted || _completedPath == null) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Archivo listo: pégalo en WhatsApp, Telegram o la app que quieras.',
+        ),
+      ),
+    );
+  }
+
+  Future<void> _editCompletedFile() async {
+    final path = _completedPath;
+    if (path == null || path.isEmpty) return;
+    final fileName = path.split(RegExp(r'[\\/]')).last;
+    final item = MediaItem(
+      id: path,
+      uri: path,
+      path: path,
+      name: fileName,
+      mimeType: '',
+      kind: MediaKind.kindForExtension(fileName),
+      sizeBytes: 0,
+    );
+    if (!item.isEditable) return;
+    await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => EditorScreen(item: item, library: createMediaLibrary()),
+      ),
+    );
   }
 
   Future<void> _openLogin() async {

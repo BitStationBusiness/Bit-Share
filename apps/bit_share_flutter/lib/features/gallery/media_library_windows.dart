@@ -15,8 +15,7 @@ import 'media_library.dart';
 class WindowsMediaLibrary implements MediaLibrary {
   WindowsMediaLibrary({String? directory, MethodChannel? nativeChannel})
     : _directory = directory ?? windowsLibraryDirectory(),
-      _nativeChannel =
-          nativeChannel ?? const MethodChannel('bitshare/windows');
+      _nativeChannel = nativeChannel ?? const MethodChannel('bitshare/windows');
 
   /// How many ffprobe processes may run at once. Enough to hide the per-probe
   /// startup cost without flooding a laptop's CPU on a large library.
@@ -30,7 +29,7 @@ class WindowsMediaLibrary implements MediaLibrary {
   String get storageLocationLabel => _directory;
 
   @override
-  bool get canShare => false;
+  bool get canShare => true;
 
   @override
   bool get canRevealInFileManager => true;
@@ -236,7 +235,11 @@ class WindowsMediaLibrary implements MediaLibrary {
 
   @override
   Future<bool> share(MediaItem item) async {
-    throw UnsupportedError('Windows no expone un menú Compartir del sistema.');
+    // A CF_HDROP clipboard entry is understood by WhatsApp, Telegram, mail
+    // clients and Explorer. It gives desktop users a reliable share flow even
+    // though Windows applications expose different native share panes.
+    await copyToClipboard(item);
+    return true;
   }
 
   @override

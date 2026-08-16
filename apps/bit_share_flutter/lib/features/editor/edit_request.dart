@@ -23,7 +23,8 @@ enum EditorRotation {
 
   /// Whether the frame's width and height swap places once applied.
   bool get swapsAxes =>
-      this == EditorRotation.clockwise || this == EditorRotation.counterClockwise;
+      this == EditorRotation.clockwise ||
+      this == EditorRotation.counterClockwise;
 }
 
 /// Output size tiers, expressed as the longest side the result may have so a
@@ -53,6 +54,7 @@ class MediaEditRequest {
     required this.start,
     required this.end,
     this.mute = false,
+    this.volume = 1.0,
     this.rotation = EditorRotation.none,
     this.speed = 1.0,
     this.quality = EditorQuality.original,
@@ -80,6 +82,11 @@ class MediaEditRequest {
   final Duration start;
   final Duration end;
   final bool mute;
+
+  /// Gain applied to the audio track. `1.0` preserves the original level,
+  /// `0.0` produces silence, and values up to `2.0` allow a quiet clip to be
+  /// boosted without exposing an unbounded (and unsafe) FFmpeg expression.
+  final double volume;
   final EditorRotation rotation;
   final double speed;
   final EditorQuality quality;
@@ -88,6 +95,7 @@ class MediaEditRequest {
     Duration? start,
     Duration? end,
     bool? mute,
+    double? volume,
     EditorRotation? rotation,
     double? speed,
     EditorQuality? quality,
@@ -98,6 +106,7 @@ class MediaEditRequest {
       start: start ?? this.start,
       end: end ?? this.end,
       mute: mute ?? this.mute,
+      volume: (volume ?? this.volume).clamp(0.0, 2.0).toDouble(),
       rotation: rotation ?? this.rotation,
       speed: speed ?? this.speed,
       quality: quality ?? this.quality,
@@ -130,6 +139,8 @@ class MediaEditRequest {
 
   bool get isSpeedAdjusted => speed != 1.0;
 
+  bool get isVolumeAdjusted => volume != 1.0;
+
   /// Downscaling only ever shrinks: asking for 720p on a 480p source would
   /// otherwise upscale it, inflating the file for no visible gain.
   bool get isRescaled => scaledSize != null;
@@ -137,11 +148,19 @@ class MediaEditRequest {
   /// Whether exporting would produce anything different from the source.
   /// The save action stays disabled until this is true.
   bool get hasChanges =>
-      isTrimmed || mute || isRotated || isSpeedAdjusted || isRescaled;
+      isTrimmed ||
+      mute ||
+      isVolumeAdjusted ||
+      isRotated ||
+      isSpeedAdjusted ||
+      isRescaled;
 
   /// Audio files have no frame to rotate or rescale, and muting one would
   /// just produce silence — the editor hides those controls for them.
   bool get supportsVideoControls => source.kind == MediaKind.video;
+
+  /// Both audio and video may carry sound. Images never reach the editor.
+  bool get supportsAudioControls => source.kind != MediaKind.image;
 
   /// Frame size after downscaling but *before* rotation — the size the
   /// `scale` filter is given, since it runs ahead of `transpose` in the chain.
