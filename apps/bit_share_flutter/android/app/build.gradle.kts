@@ -102,7 +102,7 @@ chaquopy {
         buildPython("C:/Users/BitSt/.local/bin/python3.13.exe")
         pip {
             options("--no-deps")
-            install("yt-dlp==2026.7.4")
+            install("yt-dlp==2026.8.19")
             install("curl-cffi==0.15.0")
             install("cffi==1.17.1")
             install("chaquopy-libffi==3.3")

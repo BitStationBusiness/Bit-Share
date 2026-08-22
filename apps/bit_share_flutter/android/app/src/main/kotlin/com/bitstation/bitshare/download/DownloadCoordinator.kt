@@ -262,7 +262,7 @@ internal class DownloadCoordinator(
             val outputTemplate =
                 File(taskDir, "%(title).80B [%(id)s].%(ext)s").absolutePath
             val formatSelector = if (mode == "audio") {
-                "bestaudio[ext=m4a]/bestaudio"
+                audioFormatSelector()
             } else {
                 videoFormatSelector(height)
             }
@@ -403,11 +403,26 @@ internal class DownloadCoordinator(
         )
     }
 
+    // Progressive https tracks come first on purpose. The YouTube player
+    // clients that still work without a JavaScript runtime — the only kind
+    // Android can use — publish every rendition twice, as a plain https file
+    // and as an HLS playlist. The HLS copy downloads fragment by fragment,
+    // which is slower and more failure-prone over mobile data for exactly
+    // the same picture, so it is only reached once nothing else matches.
     private fun videoFormatSelector(height: Int?): String {
         val limit = height?.takeIf { it > 0 }?.let { "[height<=$it]" }.orEmpty()
-        return "bestvideo$limit[ext=mp4]+bestaudio[ext=m4a]/" +
+        return "bestvideo$limit[ext=mp4][protocol^=http]" +
+            "+bestaudio[ext=m4a][protocol^=http]/" +
+            "bestvideo$limit[protocol^=http]+bestaudio[protocol^=http]/" +
+            "bestvideo$limit[ext=mp4]+bestaudio[ext=m4a]/" +
             "bestvideo$limit+bestaudio/" +
             "best$limit[ext=mp4][vcodec!=none]/best$limit[vcodec!=none]"
+    }
+
+    private fun audioFormatSelector(): String {
+        return "bestaudio[ext=m4a][protocol^=http]/" +
+            "bestaudio[protocol^=http]/" +
+            "bestaudio[ext=m4a]/bestaudio"
     }
 
     private fun prepareFfmpegTools(): String {
@@ -460,6 +475,20 @@ internal class DownloadCoordinator(
             "bitshare_threads_post_not_found" in message ||
                 "bitshare_threads_invalid_redirect" in message ->
                 "El enlace compartido de Threads ya no dirige a una publicación."
+            "not a bot" in message || "sign in to confirm" in message ->
+                "YouTube pidió una verificación antirrobots para este " +
+                    "enlace. Inicia sesión en Bit-Share e inténtalo de nuevo."
+            "po token" in message ||
+                "sabr" in message ||
+                "n challenge solving" in message ||
+                "javascript runtime" in message ||
+                "bitshare_no_playable_formats" in message ->
+                "YouTube cambió su reproductor y ninguna de las vías de " +
+                    "descarga disponibles funcionó. Actualiza Bit-Share a " +
+                    "la última versión e inténtalo de nuevo."
+            "needs to be reloaded" in message ->
+                "YouTube rechazó la sesión de reproducción. Vuelve a " +
+                    "intentarlo en unos segundos."
             "impersonat" in message || "http error 410" in message ->
                 "Este sitio exige una conexión de navegador que esta " +
                     "versión Android aún no puede reproducir."

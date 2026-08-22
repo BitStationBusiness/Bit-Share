@@ -368,11 +368,17 @@ Get-CimInstance Win32_Process |
     await _ensureStorage(estimatedBytes, mode);
     final cookieArguments = await _cookieArguments(browserSession);
 
+    // The same rendition is published twice by several sites — once as a
+    // plain https file and once as an HLS playlist — and yt-dlp's own
+    // ordering can land on the HLS copy, which downloads fragment by
+    // fragment for identical picture. Asking for the direct file first
+    // keeps downloads fast; the HLS copy still serves as the fallback.
+    final limit = height == null ? '' : '[height<=$height]';
     final format = mode == WindowsDownloadMode.audio
         ? null
-        : height == null
-        ? 'bestvideo*+bestaudio/best'
-        : 'bestvideo*[height<=$height]+bestaudio/best[height<=$height]';
+        : 'bestvideo*$limit[protocol^=http]+bestaudio[protocol^=http]/'
+              'bestvideo*$limit+bestaudio/'
+              'best$limit';
     final outputTemplate = joinPath(
       _outputDirectory,
       '%(title).180B [%(id)s].%(ext)s',

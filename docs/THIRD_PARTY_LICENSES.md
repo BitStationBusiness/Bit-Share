@@ -15,7 +15,7 @@ plataformas cuyos enlaces se procesan.
 
 ## yt-dlp
 
-La release integra `2026.07.04` dentro del APK mediante Chaquopy. No existe
+La release integra `2026.08.19` dentro del APK mediante Chaquopy. No existe
 actualización de código en caliente: la versión efectiva debe registrarse,
 probarse y firmarse en cada APK.
 
@@ -55,7 +55,7 @@ de compilación, bibliotecas externas, avisos y obligaciones LGPL/GPL concretas.
 
 ## Runtime Windows
 
-- yt-dlp `2026.07.04`, ejecutable oficial para Windows.
+- yt-dlp `2026.08.19`, ejecutable oficial para Windows.
 - FFmpeg `8.1.2`, build Windows de Gyan enlazado por el sitio oficial de
   FFmpeg. El artefacto local actual es `full_build`.
 - Deno `2.9.4`, ejecutable oficial x64 para Windows.

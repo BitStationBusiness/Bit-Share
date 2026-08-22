@@ -15,7 +15,7 @@ Verificado el 29 de julio de 2026:
 | Kotlin | 2.2.20 |
 | Java para Android | JDK 21.0.9 |
 | Windows SDK | 10.0.26100.0 |
-| yt-dlp Windows | 2026.07.04 |
+| yt-dlp Windows | 2026.08.19 |
 | FFmpeg Windows | 8.1.2 full build |
 | Deno Windows | 2.9.4 |
 

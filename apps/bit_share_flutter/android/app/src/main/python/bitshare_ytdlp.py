@@ -45,6 +45,9 @@ def _base_options(cookies_path=None):
         "noplaylist": True,
         "quiet": True,
         "no_warnings": True,
+        # Progress reaches the UI through the Kotlin callback; yt-dlp's own
+        # bar would only ever be written to logcat.
+        "noprogress": True,
         "impersonate": ImpersonateTarget.from_str("chrome"),
     }
     # Only set when the user explicitly logged in through Bit-Share's own
@@ -53,6 +56,100 @@ def _base_options(cookies_path=None):
     if cookies_path and os.path.isfile(cookies_path):
         options["cookiefile"] = cookies_path
     return options
+
+
+# Android ships no JavaScript runtime: neither Deno nor Node exists inside the
+# APK, and yt-dlp's EJS challenge solver is not bundled either. Every YouTube
+# player client that has to solve the `n` challenge therefore answers with
+# storyboard tiles and nothing else, so extraction can only lean on the
+# clients that still hand back real media without JS. yt-dlp's own default
+# chain runs first — it tracks upstream and normally picks a working client —
+# and these are the manual fallbacks for when a YouTube-side change breaks
+# that default before a new yt-dlp release reaches the app.
+_YOUTUBE_CLIENT_FALLBACKS = (
+    ("visionos", "tv_embedded"),
+    ("android", "ios", "mweb"),
+    ("web_safari", "web", "tv"),
+)
+
+_YOUTUBE_HOSTS = ("youtube.com", "youtu.be", "youtube-nocookie.com")
+
+
+class _NoPlayableFormats(Exception):
+    """Raised when an extraction succeeded but produced no real media."""
+
+
+def _is_youtube_url(url):
+    hostname = urlparse(url).hostname
+    return any(_host_matches(hostname, host) for host in _YOUTUBE_HOSTS)
+
+
+def _client_variants(url):
+    """Option overrides to try in order, most preferred first.
+
+    Non-YouTube URLs keep exactly one attempt, so no other provider changes
+    behaviour because of this.
+    """
+    if not _is_youtube_url(url):
+        return ({},)
+    return ({},) + tuple(
+        {"extractor_args": {"youtube": {"player_client": list(clients)}}}
+        for clients in _YOUTUBE_CLIENT_FALLBACKS
+    )
+
+
+def _error_chain(error):
+    seen = set()
+    current = error
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        yield current
+        current = current.__cause__ or current.__context__
+
+
+def _is_cancellation(error):
+    return isinstance(error, DownloadCancelled) or any(
+        "BITSHARE_CANCELLED" in str(item) for item in _error_chain(error)
+    )
+
+
+def _has_playable_format(info):
+    """True when the extraction returned something other than storyboards.
+
+    A client that cannot solve the `n` challenge still returns a perfectly
+    valid info dict — it just holds nothing but `mhtml` preview tiles.
+    Accepting that would show "this link has no video" to the user while a
+    different client would have worked, so it counts as a failure and lets
+    the next candidate run.
+    """
+    for item in info.get("formats") or ():
+        if item.get("ext") == "mhtml":
+            continue
+        video = item.get("vcodec")
+        audio = item.get("acodec")
+        if (video and video != "none") or (audio and audio != "none"):
+            return True
+    return False
+
+
+def _attempt_with_clients(url, build_options, run):
+    """Run `run` against each candidate client set until one succeeds."""
+    failure = None
+    for overrides in _client_variants(url):
+        options = build_options()
+        options.update(overrides)
+        try:
+            return run(options)
+        except (
+            DownloadError,
+            _NoPlayableFormats,
+            ValueError,
+            OSError,
+        ) as error:
+            if _is_cancellation(error):
+                raise
+            failure = error
+    raise failure
 
 
 def _positive_number(value):
@@ -460,14 +557,25 @@ def inspect_media(url, cookies_path=None, audio_url=None):
             ensure_ascii=False,
         )
 
-    options = _base_options(cookies_path)
-    options["skip_download"] = True
+    def build_options():
+        options = _base_options(cookies_path)
+        options["skip_download"] = True
+        return options
 
-    with yt_dlp.YoutubeDL(options) as downloader:
-        try:
-            info = downloader.extract_info(url, download=False)
-        except DownloadError as error:
-            raise _reraise_meta_story(url, error) from error
+    def run(options):
+        with yt_dlp.YoutubeDL(options) as downloader:
+            try:
+                extracted = downloader.extract_info(url, download=False)
+            except DownloadError as error:
+                raise _reraise_meta_story(url, error) from error
+        # Only YouTube is gated on this: other extractors legitimately omit
+        # codec metadata, and rejecting those would break providers that
+        # work today.
+        if _is_youtube_url(url) and not _has_playable_format(extracted):
+            raise _NoPlayableFormats("BITSHARE_NO_PLAYABLE_FORMATS")
+        return extracted
+
+    info = _attempt_with_clients(url, build_options, run)
 
     formats = []
     for item in info.get("formats") or []:
@@ -523,36 +631,6 @@ def download_media(
         )
 
     threads_media = _resolve_public_threads_video(url, include_size=False)
-    options = _base_options(cookies_path)
-    options.update(
-        {
-            "format": "best" if threads_media else format_selector,
-            "outtmpl": output_template,
-            "restrictfilenames": True,
-            "retries": 3,
-            "fragment_retries": 3,
-            "socket_timeout": 30,
-            "ffmpeg_location": ffmpeg_location,
-        }
-    )
-    if threads_media:
-        options["http_headers"] = {
-            "Referer": threads_media["page_url"],
-        }
-        options["outtmpl"] = os.path.join(
-            os.path.dirname(output_template),
-            "Threads [" + threads_media["id"] + "].%(ext)s",
-        )
-
-    if mode == "audio":
-        options["postprocessors"] = [
-            {
-                "key": "FFmpegExtractAudio",
-                "preferredcodec": "m4a",
-            }
-        ]
-    else:
-        options["merge_output_format"] = "mp4"
 
     def progress_hook(status):
         if callback.isCancelled():
@@ -575,16 +653,60 @@ def download_media(
             int(status.get("eta") or 0),
         )
 
-    options["progress_hooks"] = [progress_hook]
-
-    with yt_dlp.YoutubeDL(options) as downloader:
-        target_url = (
-            threads_media["media_url"] if threads_media else url
+    def build_options():
+        options = _base_options(cookies_path)
+        options.update(
+            {
+                "format": "best" if threads_media else format_selector,
+                "outtmpl": output_template,
+                "restrictfilenames": True,
+                "retries": 3,
+                "fragment_retries": 3,
+                "socket_timeout": 30,
+                "ffmpeg_location": ffmpeg_location,
+            }
         )
-        try:
-            return int(downloader.download([target_url]) or 0)
-        except DownloadError as error:
-            raise _reraise_meta_story(target_url, error) from error
+        if threads_media:
+            options["http_headers"] = {
+                "Referer": threads_media["page_url"],
+            }
+            options["outtmpl"] = os.path.join(
+                os.path.dirname(output_template),
+                "Threads [" + threads_media["id"] + "].%(ext)s",
+            )
+
+        if mode == "audio":
+            options["postprocessors"] = [
+                {
+                    "key": "FFmpegExtractAudio",
+                    "preferredcodec": "m4a",
+                }
+            ]
+        else:
+            options["merge_output_format"] = "mp4"
+        options["progress_hooks"] = [progress_hook]
+        return options
+
+    target_url = threads_media["media_url"] if threads_media else url
+
+    def run(options):
+        with yt_dlp.YoutubeDL(options) as downloader:
+            try:
+                exit_code = int(downloader.download([target_url]) or 0)
+            except DownloadError as error:
+                raise _reraise_meta_story(target_url, error) from error
+        # A non-zero exit means yt-dlp gave up without raising. Turning it
+        # into an exception is what lets the next player client be tried
+        # instead of reporting the failure straight to the user.
+        if exit_code != 0:
+            raise DownloadError(
+                "BITSHARE_ENGINE_EXIT_" + str(exit_code)
+            )
+        return exit_code
+
+    # The fallback chain is keyed on the page URL, not on the already
+    # resolved Threads CDN file: only YouTube pages have alternate clients.
+    return _attempt_with_clients(url, build_options, run)
 
 
 def runtime_info():

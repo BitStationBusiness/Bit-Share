@@ -266,7 +266,7 @@ Componentes principales incluidos:
 - Kotlin para la integración Android
 - CPython 3.13
 - Chaquopy 17.0.0
-- yt-dlp 2026.07.04
+- yt-dlp 2026.08.19
 - curl-cffi 0.15.0
 - FFmpeg 7.1.1
 - Press Start 2P con licencia SIL Open Font License 1.1
