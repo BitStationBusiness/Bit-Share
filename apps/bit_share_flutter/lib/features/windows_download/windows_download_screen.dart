@@ -84,6 +84,7 @@ class _WindowsDownloadScreenState extends State<WindowsDownloadScreen> {
                           ),
                           Text(
                             'Descarga contenido compatible desde un enlace.',
+                            overflow: TextOverflow.ellipsis,
                             style: TextStyle(
                               fontSize: 12.5,
                               color: Theme.of(
@@ -94,13 +95,19 @@ class _WindowsDownloadScreenState extends State<WindowsDownloadScreen> {
                         ],
                       ),
                     ),
-                    TextButton.icon(
+                    _HeaderAction(
+                      key: const Key('windows-header-gallery-button'),
+                      icon: Icons.video_library_outlined,
+                      tooltip: 'Galería: ver y editar lo descargado',
+                      onPressed: () => unawaited(_openGallery()),
+                    ),
+                    _HeaderAction(
+                      icon: Icons.folder_open_outlined,
+                      tooltip: 'Abrir la carpeta de descargas',
                       onPressed: _downloading
                           ? null
                           : () =>
                                 unawaited(widget.backend.openOutputDirectory()),
-                      icon: const Icon(Icons.folder_open_outlined, size: 17),
-                      label: const Text('Abrir descargas'),
                     ),
                   ],
                 ),
@@ -880,6 +887,35 @@ class _ErrorPanel extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+
+/// Icon-only header action. The content column is capped at 520px, which
+/// leaves roughly 174px beside the title and subtitle — not enough for two
+/// text labels, so a "shrink to icons when narrow" variant would only ever
+/// render its narrow branch. Two matching icons also read better as peer
+/// actions than one icon and one labelled button.
+class _HeaderAction extends StatelessWidget {
+  const _HeaderAction({
+    required this.icon,
+    required this.tooltip,
+    required this.onPressed,
+    super.key,
+  });
+
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      tooltip: tooltip,
+      onPressed: onPressed,
+      visualDensity: VisualDensity.compact,
+      icon: Icon(icon, size: 19),
     );
   }
 }

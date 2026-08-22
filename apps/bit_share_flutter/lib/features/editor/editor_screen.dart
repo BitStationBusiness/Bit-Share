@@ -47,6 +47,25 @@ class _EditorScreenState extends State<EditorScreen> {
   bool _resumeAfterTimelineScrub = false;
   bool _windowFullscreen = false;
 
+  /// Android is driven by fingers and Windows by a mouse, and the two want
+  /// different hit areas: 36px rows are comfortable with a cursor but fall
+  /// under the 48dp touch guidance. Everything sizing-related keys off this.
+  final bool _touchLayout = Platform.isAndroid;
+
+  /// Stands in for the player when no preview could be created, so the trim
+  /// bar has something to listen to. Its value never changes: there is no
+  /// playback to follow, only handles to drag.
+  final ValueNotifier<VideoPlayerValue> _idlePlayerValue = ValueNotifier(
+    const VideoPlayerValue(duration: Duration.zero),
+  );
+
+  /// Appends the keyboard shortcut to a label, but only where a keyboard is
+  /// actually expected. A wide window is not the same thing as a physical
+  /// keyboard: an Android tablet in landscape is wide and has no Ctrl key,
+  /// and promising one there is just noise.
+  String _withShortcut(String label, String key) =>
+      _touchLayout ? label : '$label ($key)';
+
   @override
   void initState() {
     super.initState();
@@ -121,6 +140,10 @@ class _EditorScreenState extends State<EditorScreen> {
   @override
   void dispose() {
     _timelineSeekDebounce?.cancel();
+    // Leaving mid-export would otherwise strand the ffmpeg process: nothing
+    // else calls cancel(), and the screen that owned it is already gone.
+    if (_exporting) unawaited(_editor.cancel());
+    _idlePlayerValue.dispose();
     _controller?.removeListener(_keepPreviewInsideSelection);
     _controller?.dispose();
     super.dispose();
@@ -150,60 +173,109 @@ class _EditorScreenState extends State<EditorScreen> {
     );
   }
 
-  bool get _canSave => !_exporting && _effectiveRequest().hasChanges;
+  bool get _canSave => !_exporting && _effectiveRequest().isExportable;
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        toolbarHeight: 52,
-        titleSpacing: 0,
-        scrolledUnderElevation: 0,
-        title: Text(
-          'Editar clip',
-          style: Theme.of(context).textTheme.titleMedium,
-        ),
-        actions: [
-          if (WindowsWindowControls.isSupported)
-            IconButton(
-              tooltip: _windowFullscreen
-                  ? 'Salir de pantalla completa (F11)'
-                  : 'Pantalla completa (F11)',
-              visualDensity: VisualDensity.compact,
-              onPressed: () => unawaited(_toggleWindowFullscreen()),
-              icon: Icon(
-                _windowFullscreen
-                    ? Icons.fullscreen_exit_rounded
-                    : Icons.fullscreen_rounded,
-                size: 20,
+    final request = _request;
+    final dirty = request != null && _effectiveRequest().hasChanges;
+    return PopScope(
+      // Leaving with pending edits used to discard them without a word. The
+      // export is the only thing that persists anything, so the confirmation
+      // is the user's single chance to notice.
+      canPop: !dirty || _exporting,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        unawaited(_confirmDiscard());
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          toolbarHeight: 52,
+          titleSpacing: 0,
+          scrolledUnderElevation: 0,
+          title: Text(
+            'Editar clip',
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          actions: [
+            if (request != null)
+              IconButton(
+                tooltip: 'Descartar los cambios',
+                visualDensity: VisualDensity.compact,
+                onPressed: dirty && !_exporting ? _resetEdits : null,
+                icon: const Icon(Icons.restart_alt_rounded, size: 20),
               ),
-            ),
-        ],
-      ),
-      body: CallbackShortcuts(
-        bindings: {
-          const SingleActivator(LogicalKeyboardKey.f11): () =>
-              unawaited(_toggleWindowFullscreen()),
-        },
-        child: Focus(
-          autofocus: true,
-          child: SafeArea(
-            child: _loading
-                ? const Center(child: CircularProgressIndicator())
-                : _error != null
-                ? Center(
-                    child: Text(
-                      _error!,
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.error,
+            if (WindowsWindowControls.isSupported)
+              IconButton(
+                tooltip: _windowFullscreen
+                    ? 'Salir de pantalla completa (F11)'
+                    : 'Pantalla completa (F11)',
+                visualDensity: VisualDensity.compact,
+                onPressed: () => unawaited(_toggleWindowFullscreen()),
+                icon: Icon(
+                  _windowFullscreen
+                      ? Icons.fullscreen_exit_rounded
+                      : Icons.fullscreen_rounded,
+                  size: 20,
+                ),
+              ),
+          ],
+        ),
+        body: CallbackShortcuts(
+          bindings: _shortcutBindings(),
+          child: Focus(
+            autofocus: true,
+            child: SafeArea(
+              child: _loading
+                  ? const Center(child: CircularProgressIndicator())
+                  : _error != null
+                  ? Center(
+                      child: Text(
+                        _error!,
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.error,
+                        ),
                       ),
-                    ),
-                  )
-                : _buildEditor(context),
+                    )
+                  : _buildEditor(context),
+            ),
           ),
         ),
       ),
     );
+  }
+
+  /// Desktop editing is keyboard-first. These mirror the bindings a user
+  /// already knows from other editors, so the mouse is never the only way to
+  /// reach a control.
+  Map<ShortcutActivator, VoidCallback> _shortcutBindings() {
+    return {
+      const SingleActivator(LogicalKeyboardKey.f11): () =>
+          unawaited(_toggleWindowFullscreen()),
+      const SingleActivator(LogicalKeyboardKey.space): _togglePlayback,
+      const SingleActivator(LogicalKeyboardKey.keyK): _togglePlayback,
+      const SingleActivator(LogicalKeyboardKey.arrowLeft): () =>
+          _seekBy(const Duration(seconds: -1)),
+      const SingleActivator(LogicalKeyboardKey.arrowRight): () =>
+          _seekBy(const Duration(seconds: 1)),
+      const SingleActivator(LogicalKeyboardKey.arrowLeft, shift: true): () =>
+          _seekBy(const Duration(seconds: -10)),
+      const SingleActivator(LogicalKeyboardKey.arrowRight, shift: true): () =>
+          _seekBy(const Duration(seconds: 10)),
+      const SingleActivator(LogicalKeyboardKey.keyJ): () =>
+          _seekBy(const Duration(seconds: -10)),
+      const SingleActivator(LogicalKeyboardKey.keyL): () =>
+          _seekBy(const Duration(seconds: 10)),
+      const SingleActivator(LogicalKeyboardKey.keyI): _setStartAtPlayhead,
+      const SingleActivator(LogicalKeyboardKey.keyO): _setEndAtPlayhead,
+      const SingleActivator(LogicalKeyboardKey.home): () =>
+          _seekTo(Duration(milliseconds: (_range?.start ?? 0).round())),
+      const SingleActivator(LogicalKeyboardKey.end): () =>
+          _seekTo(Duration(milliseconds: (_range?.end ?? 0).round())),
+      const SingleActivator(LogicalKeyboardKey.keyS, control: true): () {
+        if (_canSave) unawaited(_save());
+      },
+    };
   }
 
   Widget _buildEditor(BuildContext context) {
@@ -213,8 +285,13 @@ class _EditorScreenState extends State<EditorScreen> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final wide = constraints.maxWidth >= 620;
+        // The old 420px ceiling was tuned for a small window and left a
+        // tablet in landscape showing a postage-stamp preview surrounded by
+        // several hundred pixels of nothing. The preview may now use the
+        // height it is actually given; the aspect ratio still bounds the
+        // width, so a landscape clip never grows past its column.
         final previewHeight = wide
-            ? math.min(420.0, math.max(220.0, constraints.maxHeight - 36))
+            ? math.max(240.0, constraints.maxHeight - 24)
             : math.min(280.0, math.max(170.0, constraints.maxHeight * .38));
         final preview = _buildPreviewPanel(
           context,
@@ -234,7 +311,11 @@ class _EditorScreenState extends State<EditorScreen> {
             Expanded(
               child: Center(
                 child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 920),
+                  // 920 kept the preview around 400px wide on a normal
+                  // desktop window, with the rest of the screen empty. The
+                  // cap still exists so the controls do not stretch across
+                  // an ultrawide monitor, just further out.
+                  constraints: const BoxConstraints(maxWidth: 1320),
                   child: wide
                       ? Padding(
                           padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
@@ -328,13 +409,16 @@ class _EditorScreenState extends State<EditorScreen> {
     VideoPlayerController? controller,
   ) {
     return [
-      if (controller != null)
-        _EditorSection(
-          icon: Icons.content_cut_rounded,
-          title: 'RECORTE',
-          child: _buildTrimTimeline(controller, range, request),
-        ),
-      if (controller != null) const SizedBox(height: 10),
+      // Cutting only needs the duration, which probe() already provided.
+      // Gating this on the preview meant an unsupported codec removed the
+      // editor's whole reason for existing while still claiming the file
+      // could be edited.
+      _EditorSection(
+        icon: Icons.content_cut_rounded,
+        title: 'RECORTE',
+        child: _buildTrimTimeline(controller, range, request),
+      ),
+      const SizedBox(height: 10),
       _EditorSection(
         icon: Icons.tune_rounded,
         title: 'AJUSTES',
@@ -367,22 +451,72 @@ class _EditorScreenState extends State<EditorScreen> {
         ? 1 / sourceAspectRatio
         : sourceAspectRatio;
     final previewWidth = math.min(maxWidth, maxHeight * displayAspectRatio);
-    return Center(
+    // heightFactor: 1 makes this hug the video instead of expanding to the
+    // full constraint, which is what padded the surrounding card out to a
+    // height its content never used.
+    return Align(
+      heightFactor: 1,
       child: SizedBox(
         width: previewWidth,
         height: previewWidth / displayAspectRatio,
         child: ClipRRect(
           borderRadius: BorderRadius.circular(12),
-          child: ColoredBox(
-            color: Colors.black,
-            child: RotatedBox(
-              quarterTurns: rotation.previewQuarterTurns,
-              // The Windows player publishes native texture frames directly.
-              // Do not place that texture behind a repaint boundary: it can
-              // defer visual updates while the controls are being repainted.
-              child: AspectRatio(
-                aspectRatio: sourceAspectRatio,
-                child: VideoPlayer(controller),
+          // Tapping the image to start and stop is the one gesture every
+          // video surface has taught users to expect; without it the only
+          // way to play was the small button under the timeline.
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: _exporting ? null : _togglePlayback,
+            child: MouseRegion(
+              cursor: _exporting
+                  ? SystemMouseCursors.basic
+                  : SystemMouseCursors.click,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  ColoredBox(
+                    color: Colors.black,
+                    child: RotatedBox(
+                      quarterTurns: rotation.previewQuarterTurns,
+                      // The Windows player publishes native texture frames
+                      // directly. Do not place that texture behind a repaint
+                      // boundary: it can defer visual updates while the
+                      // controls are being repainted.
+                      child: AspectRatio(
+                        aspectRatio: sourceAspectRatio,
+                        child: VideoPlayer(controller),
+                      ),
+                    ),
+                  ),
+                  // Only the badge listens to the controller. Rebuilding the
+                  // VideoPlayer above on every position tick would put the
+                  // native texture through exactly the repaint churn the
+                  // comment there warns about.
+                  ValueListenableBuilder<VideoPlayerValue>(
+                    valueListenable: controller,
+                    builder: (context, value, child) => AnimatedOpacity(
+                      opacity: value.isPlaying ? 0 : 1,
+                      duration: const Duration(milliseconds: 140),
+                      child: IgnorePointer(child: child),
+                    ),
+                    child: const Center(
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: Colors.black45,
+                          shape: BoxShape.circle,
+                        ),
+                        child: Padding(
+                          padding: EdgeInsets.all(10),
+                          child: Icon(
+                            Icons.play_arrow_rounded,
+                            size: 34,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
@@ -392,12 +526,12 @@ class _EditorScreenState extends State<EditorScreen> {
   }
 
   Widget _buildTrimTimeline(
-    VideoPlayerController controller,
+    VideoPlayerController? controller,
     RangeValues range,
     MediaEditRequest request,
   ) {
     return ValueListenableBuilder<VideoPlayerValue>(
-      valueListenable: controller,
+      valueListenable: controller ?? _idlePlayerValue,
       builder: (context, value, _) {
         final start = Duration(milliseconds: range.start.round());
         final end = Duration(milliseconds: range.end.round());
@@ -407,20 +541,24 @@ class _EditorScreenState extends State<EditorScreen> {
             : rawPosition > end
             ? end
             : rawPosition;
+        final controlHeight = _touchLayout ? 44.0 : 36.0;
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             SizedBox(
-              height: 36,
+              height: controlHeight,
               child: Row(
                 children: [
                   IconButton(
-                    tooltip: value.isPlaying ? 'Pausar' : 'Reproducir',
+                    tooltip: _withShortcut(
+                      value.isPlaying ? 'Pausar' : 'Reproducir',
+                      'Espacio',
+                    ),
                     visualDensity: VisualDensity.compact,
-                    iconSize: 28,
-                    constraints: const BoxConstraints.tightFor(
-                      width: 34,
-                      height: 34,
+                    iconSize: _touchLayout ? 34 : 28,
+                    constraints: BoxConstraints.tightFor(
+                      width: controlHeight,
+                      height: controlHeight,
                     ),
                     padding: EdgeInsets.zero,
                     icon: Icon(
@@ -428,20 +566,9 @@ class _EditorScreenState extends State<EditorScreen> {
                           ? Icons.pause_circle_filled
                           : Icons.play_circle_filled,
                     ),
-                    onPressed: _exporting
+                    onPressed: _exporting || controller == null
                         ? null
-                        : () {
-                            if (value.isPlaying) {
-                              unawaited(controller.pause());
-                              return;
-                            }
-                            unawaited(
-                              (position >= end
-                                      ? controller.seekTo(start)
-                                      : Future<void>.value())
-                                  .then((_) => controller.play()),
-                            );
-                          },
+                        : _togglePlayback,
                   ),
                   const SizedBox(width: 8),
                   Text(
@@ -450,9 +577,29 @@ class _EditorScreenState extends State<EditorScreen> {
                     style: Theme.of(context).textTheme.labelLarge,
                   ),
                   const Spacer(),
-                  Text(
-                    '${formatDuration(start)} – ${formatDuration(end)}',
-                    style: Theme.of(context).textTheme.labelMedium,
+                  // These read as labels but act as controls: each one shows
+                  // where its handle currently sits and moves it to the
+                  // playhead when pressed. That is the only precise way to
+                  // cut a long clip, where one pixel of the bar can be
+                  // several seconds, and it works by touch as well as by key.
+                  _TrimEdgeButton(
+                    label: 'Inicio',
+                    value: formatDuration(start),
+                    tooltip: _withShortcut('Cortar el inicio aquí', 'I'),
+                    height: controlHeight,
+                    onPressed: _exporting || controller == null
+                        ? null
+                        : _setStartAtPlayhead,
+                  ),
+                  const SizedBox(width: 4),
+                  _TrimEdgeButton(
+                    label: 'Fin',
+                    value: formatDuration(end),
+                    tooltip: _withShortcut('Cortar el final aquí', 'O'),
+                    height: controlHeight,
+                    onPressed: _exporting || controller == null
+                        ? null
+                        : _setEndAtPlayhead,
                   ),
                 ],
               ),
@@ -462,6 +609,7 @@ class _EditorScreenState extends State<EditorScreen> {
               range: range,
               positionMilliseconds: position.inMilliseconds.toDouble(),
               enabled: !_exporting,
+              touchLayout: _touchLayout,
               onRangeChanged: (values) => _updateTrimRange(controller, values),
               onSeekStart: (milliseconds) =>
                   _beginTimelineScrub(controller, milliseconds),
@@ -476,19 +624,152 @@ class _EditorScreenState extends State<EditorScreen> {
     );
   }
 
-  void _updateTrimRange(VideoPlayerController controller, RangeValues values) {
-    setState(() => _range = values);
+  void _updateTrimRange(
+    VideoPlayerController? controller,
+    RangeValues values,
+  ) {
+    final clamped = _clampSelection(values);
+    setState(() => _range = clamped);
+    if (controller == null) return;
     final position = controller.value.position.inMilliseconds.toDouble();
-    if (position < values.start || position > values.end) {
-      final target = position < values.start ? values.start : values.end;
+    if (position < clamped.start || position > clamped.end) {
+      final target = position < clamped.start ? clamped.start : clamped.end;
       unawaited(controller.seekTo(Duration(milliseconds: target.round())));
     }
   }
 
+  /// Keeps the two handles at least [editorMinimumSelection] apart, pushing
+  /// whichever one is being dragged rather than the one the user is holding
+  /// still, so a drag never silently moves the opposite end.
+  RangeValues _clampSelection(RangeValues values, {bool movingStart = true}) {
+    final total = _request!.sourceDuration.inMilliseconds.toDouble();
+    final minimum = editorMinimumSelection.inMilliseconds.toDouble();
+    var start = values.start.clamp(0.0, total);
+    var end = values.end.clamp(0.0, total);
+    if (end - start >= minimum) return RangeValues(start, end);
+    if (movingStart) {
+      start = math.min(start, math.max(0.0, total - minimum));
+      end = math.min(total, start + minimum);
+    } else {
+      end = math.max(end, math.min(total, minimum));
+      start = math.max(0.0, end - minimum);
+    }
+    return RangeValues(start, end);
+  }
+
+  void _togglePlayback() {
+    final controller = _controller;
+    final range = _range;
+    if (controller == null || range == null || _exporting) return;
+    if (controller.value.isPlaying) {
+      unawaited(controller.pause());
+      return;
+    }
+    final end = Duration(milliseconds: range.end.round());
+    final start = Duration(milliseconds: range.start.round());
+    // Restarting from the cut's beginning is what the play button already
+    // does; the keyboard path must not behave differently.
+    final rewind = controller.value.position >= end
+        ? controller.seekTo(start)
+        : Future<void>.value();
+    unawaited(rewind.then((_) => controller.play()));
+  }
+
+  void _seekBy(Duration delta) {
+    final controller = _controller;
+    if (controller == null) return;
+    _seekTo(controller.value.position + delta);
+  }
+
+  void _seekTo(Duration position) {
+    final controller = _controller;
+    final range = _range;
+    if (controller == null || range == null || _exporting) return;
+    final start = Duration(milliseconds: range.start.round());
+    final end = Duration(milliseconds: range.end.round());
+    final target = position < start ? start : (position > end ? end : position);
+    unawaited(controller.seekTo(target));
+  }
+
+  /// Moves the near handle to wherever the playhead sits. Dragging a handle
+  /// on a long clip is guesswork — a pixel can be several seconds — so the
+  /// playhead, which can be positioned exactly, doubles as the precise way
+  /// to set the cut.
+  void _setStartAtPlayhead() {
+    final controller = _controller;
+    final range = _range;
+    if (controller == null || range == null || _exporting) return;
+    final position = controller.value.position.inMilliseconds.toDouble();
+    setState(
+      () => _range = _clampSelection(
+        RangeValues(position, range.end),
+        movingStart: true,
+      ),
+    );
+  }
+
+  void _setEndAtPlayhead() {
+    final controller = _controller;
+    final range = _range;
+    if (controller == null || range == null || _exporting) return;
+    final position = controller.value.position.inMilliseconds.toDouble();
+    setState(
+      () => _range = _clampSelection(
+        RangeValues(range.start, position),
+        movingStart: false,
+      ),
+    );
+  }
+
+  void _resetEdits() {
+    final request = _request;
+    if (request == null || _exporting) return;
+    final duration = request.sourceDuration;
+    setState(() {
+      _request = MediaEditRequest.untouched(
+        source: request.source,
+        duration: duration,
+      );
+      _range = RangeValues(0, duration.inMilliseconds.toDouble());
+    });
+    final controller = _controller;
+    if (controller != null) {
+      unawaited(controller.setPlaybackSpeed(1.0));
+      unawaited(controller.setVolume(1));
+      unawaited(controller.seekTo(Duration.zero));
+    }
+  }
+
+  Future<void> _confirmDiscard() async {
+    final navigator = Navigator.of(context);
+    final discard = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Descartar los cambios'),
+        content: const Text(
+          'Has ajustado este clip pero aún no has guardado la copia. '
+          'Si sales ahora se perderán los ajustes.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Seguir editando'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Salir sin guardar'),
+          ),
+        ],
+      ),
+    );
+    if (discard == true && navigator.mounted) navigator.pop();
+  }
+
   void _beginTimelineScrub(
-    VideoPlayerController controller,
+    VideoPlayerController? controller,
     double milliseconds,
   ) {
+    if (controller == null) return;
     _resumeAfterTimelineScrub = controller.value.isPlaying;
     if (controller.value.isPlaying) unawaited(controller.pause());
     setState(
@@ -498,9 +779,10 @@ class _EditorScreenState extends State<EditorScreen> {
   }
 
   void _updateTimelineScrub(
-    VideoPlayerController controller,
+    VideoPlayerController? controller,
     double milliseconds,
   ) {
+    if (controller == null) return;
     final position = Duration(milliseconds: milliseconds.round());
     setState(() => _timelineScrubPosition = position);
     _timelineSeekDebounce?.cancel();
@@ -511,9 +793,10 @@ class _EditorScreenState extends State<EditorScreen> {
   }
 
   Future<void> _finishTimelineScrub(
-    VideoPlayerController controller,
+    VideoPlayerController? controller,
     double milliseconds,
   ) async {
+    if (controller == null) return;
     _timelineSeekDebounce?.cancel();
     final shouldResume = _resumeAfterTimelineScrub;
     _resumeAfterTimelineScrub = false;
@@ -534,7 +817,9 @@ class _EditorScreenState extends State<EditorScreen> {
               const Icon(Icons.volume_up_outlined, size: 18),
               const SizedBox(width: 8),
               SizedBox(
-                width: 92,
+                // 92 was too tight for "Volumen 100%", which wrapped onto a
+                // second line inside a row only 36px tall.
+                width: 120,
                 child: Text(
                   'Volumen $percentage%',
                   style: Theme.of(context).textTheme.bodyMedium,
@@ -706,7 +991,20 @@ class _EditorScreenState extends State<EditorScreen> {
       top: false,
       child: LayoutBuilder(
         builder: (context, constraints) {
-          final compact = constraints.maxWidth >= 620;
+          final wide = constraints.maxWidth >= 620;
+          final saveButton = SizedBox(
+            width: wide ? 240 : double.infinity,
+            child: FilledButton.icon(
+              onPressed: _canSave ? () => unawaited(_save()) : null,
+              icon: const Icon(Icons.save_outlined, size: 17),
+              label: Text(
+                _exporting
+                    ? 'Guardando…'
+                    : _withShortcut('Guardar copia', 'Ctrl+S'),
+              ),
+            ),
+          );
+          final summary = _buildResultSummary(context);
           return Padding(
             padding: const EdgeInsets.fromLTRB(12, 6, 12, 10),
             child: Column(
@@ -729,19 +1027,76 @@ class _EditorScreenState extends State<EditorScreen> {
                   ),
                   const SizedBox(height: 8),
                 ],
-                SizedBox(
-                  width: compact ? 240 : double.infinity,
-                  child: FilledButton.icon(
-                    onPressed: _canSave ? () => unawaited(_save()) : null,
-                    icon: const Icon(Icons.save_outlined, size: 17),
-                    label: Text(_exporting ? 'Guardando…' : 'Guardar copia'),
-                  ),
-                ),
+                if (wide)
+                  Row(
+                    children: [
+                      Expanded(child: summary),
+                      const SizedBox(width: 12),
+                      saveButton,
+                    ],
+                  )
+                else ...[
+                  Align(alignment: Alignment.centerLeft, child: summary),
+                  const SizedBox(height: 8),
+                  saveButton,
+                ],
               ],
             ),
           );
         },
       ),
+    );
+  }
+
+  /// What the exported file will actually be. MediaEditRequest already works
+  /// the length and pixel size out exactly so they can be shown rather than
+  /// left to an ffmpeg expression — until now nothing displayed them, and the
+  /// user had to press Guardar to find out what they were getting.
+  Widget _buildResultSummary(BuildContext context) {
+    final request = _request;
+    if (request == null) return const SizedBox.shrink();
+    final effective = _effectiveRequest();
+    final colors = Theme.of(context).colorScheme;
+    if (!effective.hasChanges) {
+      return Text(
+        'Sin cambios todavía. Ajusta el clip para poder guardar una copia.',
+        style: Theme.of(
+          context,
+        ).textTheme.bodySmall?.copyWith(color: colors.onSurfaceVariant),
+      );
+    }
+    if (!effective.hasUsableSelection) {
+      return Text(
+        'La selección es demasiado corta para exportarla.',
+        style: Theme.of(
+          context,
+        ).textTheme.bodySmall?.copyWith(color: colors.error),
+      );
+    }
+    final parts = <String>[formatDuration(effective.outputDuration)];
+    final size = effective.outputSize;
+    if (size != null) parts.add('${size.width}×${size.height}');
+    if (effective.isSpeedAdjusted) parts.add('${effective.speed}×');
+    if (effective.mute) {
+      parts.add('sin audio');
+    } else if (effective.isVolumeAdjusted) {
+      parts.add('volumen ${(effective.volume * 100).round()}%');
+    }
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(Icons.movie_creation_outlined, size: 15, color: colors.primary),
+        const SizedBox(width: 6),
+        Flexible(
+          child: Text(
+            'Resultado: ${parts.join(' · ')}',
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: colors.onSurfaceVariant,
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -861,6 +1216,7 @@ class _TrimTimelineBar extends StatefulWidget {
     required this.range,
     required this.positionMilliseconds,
     required this.enabled,
+    required this.touchLayout,
     required this.onRangeChanged,
     required this.onSeekStart,
     required this.onSeek,
@@ -871,6 +1227,7 @@ class _TrimTimelineBar extends StatefulWidget {
   final RangeValues range;
   final double positionMilliseconds;
   final bool enabled;
+  final bool touchLayout;
   final ValueChanged<RangeValues> onRangeChanged;
   final ValueChanged<double> onSeekStart;
   final ValueChanged<double> onSeek;
@@ -907,8 +1264,10 @@ class _TrimTimelineBarState extends State<_TrimTimelineBar> {
 
     // Trim handles live in the lower half; the upper half always belongs to
     // the playhead. This removes ambiguity when playhead and start coincide.
-    if (details.localPosition.dy >= 18 &&
-        math.min(startDistance, endDistance) <= 18 &&
+    final handleBand = widget.touchLayout ? 24.0 : 18.0;
+    final grabRadius = widget.touchLayout ? 26.0 : 18.0;
+    if (details.localPosition.dy >= handleBand &&
+        math.min(startDistance, endDistance) <= grabRadius &&
         math.min(startDistance, endDistance) <= playheadDistance) {
       _target = startDistance <= endDistance
           ? _TimelineDragTarget.start
@@ -979,7 +1338,7 @@ class _TrimTimelineBarState extends State<_TrimTimelineBar> {
         Duration(milliseconds: widget.positionMilliseconds.round()),
       ),
       child: SizedBox(
-        height: 42,
+        height: widget.touchLayout ? 54 : 42,
         child: LayoutBuilder(
           builder: (context, constraints) => GestureDetector(
             behavior: HitTestBehavior.opaque,
@@ -999,6 +1358,7 @@ class _TrimTimelineBarState extends State<_TrimTimelineBar> {
                   range: widget.range,
                   positionMilliseconds: widget.positionMilliseconds,
                   enabled: widget.enabled,
+                  handleRadius: widget.touchLayout ? 11 : 8,
                   activeColor: colors.primary,
                   inactiveColor: colors.outlineVariant,
                   playheadColor: colors.onSurface,
@@ -1018,6 +1378,7 @@ class _TrimTimelinePainter extends CustomPainter {
     required this.range,
     required this.positionMilliseconds,
     required this.enabled,
+    required this.handleRadius,
     required this.activeColor,
     required this.inactiveColor,
     required this.playheadColor,
@@ -1027,6 +1388,7 @@ class _TrimTimelinePainter extends CustomPainter {
   final RangeValues range;
   final double positionMilliseconds;
   final bool enabled;
+  final double handleRadius;
   final Color activeColor;
   final Color inactiveColor;
   final Color playheadColor;
@@ -1038,20 +1400,25 @@ class _TrimTimelinePainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    const trackY = 25.0;
+    // Derived from the height so the same painter serves the taller touch
+    // bar and the compact pointer one without a second set of constants.
+    final trackY = size.height * .6;
+    final playheadTop = size.height * .16;
     final startX = _x(range.start, size.width);
     final endX = _x(range.end, size.width);
     final playheadX = _x(positionMilliseconds, size.width);
     final opacity = enabled ? 1.0 : .45;
 
     canvas.drawLine(
-      const Offset(10, trackY),
+      Offset(10, trackY),
       Offset(size.width - 10, trackY),
       Paint()
         ..color = inactiveColor.withValues(alpha: .65 * opacity)
         ..strokeWidth = 4
         ..strokeCap = StrokeCap.round,
     );
+    // The trimmed-away head and tail are dimmed rather than merely left
+    // undrawn, so at a glance it is obvious how much of the clip survives.
     canvas.drawLine(
       Offset(startX, trackY),
       Offset(endX, trackY),
@@ -1061,18 +1428,18 @@ class _TrimTimelinePainter extends CustomPainter {
         ..strokeCap = StrokeCap.round,
     );
     final handlePaint = Paint()..color = activeColor.withValues(alpha: opacity);
-    canvas.drawCircle(Offset(startX, trackY), 8, handlePaint);
-    canvas.drawCircle(Offset(endX, trackY), 8, handlePaint);
+    canvas.drawCircle(Offset(startX, trackY), handleRadius, handlePaint);
+    canvas.drawCircle(Offset(endX, trackY), handleRadius, handlePaint);
 
     final playheadPaint = Paint()
       ..color = playheadColor.withValues(alpha: opacity)
       ..strokeWidth = 2;
     canvas.drawLine(
-      Offset(playheadX, 7),
-      Offset(playheadX, trackY + 8),
+      Offset(playheadX, playheadTop),
+      Offset(playheadX, trackY + handleRadius),
       playheadPaint,
     );
-    canvas.drawCircle(Offset(playheadX, 7), 4, playheadPaint);
+    canvas.drawCircle(Offset(playheadX, playheadTop), 4, playheadPaint);
   }
 
   @override
@@ -1081,6 +1448,7 @@ class _TrimTimelinePainter extends CustomPainter {
       oldDelegate.range != range ||
       oldDelegate.positionMilliseconds != positionMilliseconds ||
       oldDelegate.enabled != enabled ||
+      oldDelegate.handleRadius != handleRadius ||
       oldDelegate.activeColor != activeColor ||
       oldDelegate.inactiveColor != inactiveColor ||
       oldDelegate.playheadColor != playheadColor;
@@ -1137,6 +1505,75 @@ class _PreviewFallback extends StatelessWidget {
               ),
             ],
           ],
+        ),
+      ),
+    );
+  }
+}
+
+
+/// Shows where one trim handle sits and moves it to the playhead when
+/// pressed. Doubling the readout as the control keeps the row compact while
+/// giving touch users the same precision the I/O keys give on desktop.
+class _TrimEdgeButton extends StatelessWidget {
+  const _TrimEdgeButton({
+    required this.label,
+    required this.value,
+    required this.tooltip,
+    required this.height,
+    required this.onPressed,
+  });
+
+  final String label;
+  final String value;
+  final String tooltip;
+  final double height;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final enabled = onPressed != null;
+    return Tooltip(
+      message: tooltip,
+      child: SizedBox(
+        height: height,
+        child: TextButton(
+          onPressed: onPressed,
+          style: TextButton.styleFrom(
+            minimumSize: Size(0, height),
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(
+                label,
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: enabled
+                      ? colors.onSurfaceVariant
+                      : colors.onSurfaceVariant.withValues(alpha: .45),
+                  height: 1,
+                ),
+              ),
+              const SizedBox(height: 1),
+              Text(
+                value,
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                  color: enabled
+                      ? colors.onSurface
+                      : colors.onSurface.withValues(alpha: .45),
+                  height: 1,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

@@ -55,6 +55,12 @@ enum EditorQuality {
 /// ffmpeg `atempo` handles without chaining, which keeps audio artefact-free.
 const editorSpeeds = <double>[0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
 
+/// Shortest cut the editor will let the handles produce. Without a floor the
+/// two trim handles can be dragged onto each other, and the export pipeline
+/// happily turns that into `-t 0` — an empty file the user has no reason to
+/// want and no obvious way to diagnose.
+const editorMinimumSelection = Duration(milliseconds: 200);
+
 /// An edit the user has composed but not yet exported.
 @immutable
 class MediaEditRequest {
@@ -164,6 +170,13 @@ class MediaEditRequest {
       isRotated ||
       isSpeedAdjusted ||
       isRescaled;
+
+  /// A selection long enough to be worth exporting. Guards the save action so
+  /// a degenerate cut can never reach ffmpeg.
+  bool get hasUsableSelection => selectionDuration >= editorMinimumSelection;
+
+  /// Whether this request can be exported as it stands.
+  bool get isExportable => hasChanges && hasUsableSelection;
 
   /// Audio files have no frame to rotate or rescale, and muting one would
   /// just produce silence — the editor hides those controls for them.
