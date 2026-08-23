@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
@@ -50,7 +51,9 @@ class _EditorScreenState extends State<EditorScreen> {
   /// Android is driven by fingers and Windows by a mouse, and the two want
   /// different hit areas: 36px rows are comfortable with a cursor but fall
   /// under the 48dp touch guidance. Everything sizing-related keys off this.
-  final bool _touchLayout = Platform.isAndroid;
+  /// Read from [defaultTargetPlatform] rather than `Platform.isAndroid` so a
+  /// widget test can pin the platform and exercise the real touch sizes.
+  bool get _touchLayout => defaultTargetPlatform == TargetPlatform.android;
 
   /// Stands in for the player when no preview could be created, so the trim
   /// bar has something to listen to. Its value never changes: there is no
@@ -109,11 +112,16 @@ class _EditorScreenState extends State<EditorScreen> {
   /// cannot render, so controls are shown with a clear fallback instead.
   Future<void> _preparePreview(MediaItem item) async {
     if (mounted) setState(() => _preparingPreview = true);
-    final source = await prepareEditorPreview(item);
-    final controller = source.path != null
-        ? VideoPlayerController.file(File(source.path!))
-        : VideoPlayerController.contentUri(Uri.parse(source.uri));
+    // Everything here is inside the guard, including building the preview
+    // source. It used to sit outside, so a failure there escaped to
+    // _prepare()'s catch and replaced the whole editor with an error page —
+    // the exact opposite of what this method promises.
+    VideoPlayerController? controller;
     try {
+      final source = await prepareEditorPreview(item);
+      controller = source.path != null
+          ? VideoPlayerController.file(File(source.path!))
+          : VideoPlayerController.contentUri(Uri.parse(source.uri));
       await controller.initialize();
       if (!mounted) {
         await controller.dispose();
@@ -126,12 +134,13 @@ class _EditorScreenState extends State<EditorScreen> {
         _preparingPreview = false;
       });
     } catch (_) {
-      await controller.dispose();
+      await controller?.dispose();
       if (mounted) {
         setState(() {
           _preparingPreview = false;
           _previewError =
-              'No se pudo cargar la previsualización, pero puedes editar y exportar el archivo.';
+              'No se pudo cargar la previsualización, pero puedes '
+              'recortar y exportar el archivo.';
         });
       }
     }
@@ -571,35 +580,16 @@ class _EditorScreenState extends State<EditorScreen> {
                         : _togglePlayback,
                   ),
                   const SizedBox(width: 8),
-                  Text(
-                    '${formatDuration(position)} / '
-                    '${formatDuration(request.sourceDuration)}',
-                    style: Theme.of(context).textTheme.labelLarge,
-                  ),
-                  const Spacer(),
-                  // These read as labels but act as controls: each one shows
-                  // where its handle currently sits and moves it to the
-                  // playhead when pressed. That is the only precise way to
-                  // cut a long clip, where one pixel of the bar can be
-                  // several seconds, and it works by touch as well as by key.
-                  _TrimEdgeButton(
-                    label: 'Inicio',
-                    value: formatDuration(start),
-                    tooltip: _withShortcut('Cortar el inicio aquí', 'I'),
-                    height: controlHeight,
-                    onPressed: _exporting || controller == null
-                        ? null
-                        : _setStartAtPlayhead,
-                  ),
-                  const SizedBox(width: 4),
-                  _TrimEdgeButton(
-                    label: 'Fin',
-                    value: formatDuration(end),
-                    tooltip: _withShortcut('Cortar el final aquí', 'O'),
-                    height: controlHeight,
-                    onPressed: _exporting || controller == null
-                        ? null
-                        : _setEndAtPlayhead,
+                  // Flexible, not fixed: a 12-minute clip makes this string
+                  // half again as long as a 19-second one, and on a 360dp
+                  // phone that difference overflowed the row.
+                  Flexible(
+                    child: Text(
+                      '${formatDuration(position)} / '
+                      '${formatDuration(request.sourceDuration)}',
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.labelLarge,
+                    ),
                   ),
                 ],
               ),
@@ -618,16 +608,45 @@ class _EditorScreenState extends State<EditorScreen> {
               onSeekEnd: (milliseconds) =>
                   unawaited(_finishTimelineScrub(controller, milliseconds)),
             ),
+            const SizedBox(height: 6),
+            // Each one shows where its handle sits and moves it to the
+            // playhead when pressed — the only precise way to cut a long
+            // clip, where a pixel of the bar can be several seconds. Given
+            // half the width each, no clip length can push them out of view.
+            Row(
+              children: [
+                Expanded(
+                  child: _TrimEdgeButton(
+                    label: 'Inicio',
+                    value: formatDuration(start),
+                    tooltip: _withShortcut('Cortar el inicio aquí', 'I'),
+                    height: controlHeight,
+                    onPressed: _exporting || controller == null
+                        ? null
+                        : _setStartAtPlayhead,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _TrimEdgeButton(
+                    label: 'Fin',
+                    value: formatDuration(end),
+                    tooltip: _withShortcut('Cortar el final aquí', 'O'),
+                    height: controlHeight,
+                    onPressed: _exporting || controller == null
+                        ? null
+                        : _setEndAtPlayhead,
+                  ),
+                ),
+              ],
+            ),
           ],
         );
       },
     );
   }
 
-  void _updateTrimRange(
-    VideoPlayerController? controller,
-    RangeValues values,
-  ) {
+  void _updateTrimRange(VideoPlayerController? controller, RangeValues values) {
     final clamped = _clampSelection(values);
     setState(() => _range = clamped);
     if (controller == null) return;
@@ -1091,9 +1110,9 @@ class _EditorScreenState extends State<EditorScreen> {
           child: Text(
             'Resultado: ${parts.join(' · ')}',
             overflow: TextOverflow.ellipsis,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: colors.onSurfaceVariant,
-            ),
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: colors.onSurfaceVariant),
           ),
         ),
       ],
@@ -1511,7 +1530,6 @@ class _PreviewFallback extends StatelessWidget {
   }
 }
 
-
 /// Shows where one trim handle sits and moves it to the playhead when
 /// pressed. Doubling the readout as the control keeps the row compact while
 /// giving touch users the same precision the I/O keys give on desktop.
@@ -1548,28 +1566,31 @@ class _TrimEdgeButton extends StatelessWidget {
               borderRadius: BorderRadius.circular(8),
             ),
           ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
+          child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Text(
-                label,
-                style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  color: enabled
-                      ? colors.onSurfaceVariant
-                      : colors.onSurfaceVariant.withValues(alpha: .45),
-                  height: 1,
+              Flexible(
+                child: Text(
+                  label,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: enabled
+                        ? colors.onSurfaceVariant
+                        : colors.onSurfaceVariant.withValues(alpha: .45),
+                  ),
                 ),
               ),
-              const SizedBox(height: 1),
-              Text(
-                value,
-                style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                  fontWeight: FontWeight.w700,
-                  color: enabled
-                      ? colors.onSurface
-                      : colors.onSurface.withValues(alpha: .45),
-                  height: 1,
+              const SizedBox(width: 6),
+              Flexible(
+                child: Text(
+                  value,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    color: enabled
+                        ? colors.onSurface
+                        : colors.onSurface.withValues(alpha: .45),
+                  ),
                 ),
               ),
             ],

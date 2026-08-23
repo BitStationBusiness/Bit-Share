@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param()
 
 $ErrorActionPreference = 'Stop'
@@ -91,10 +91,21 @@ $ffmpegPackage = '8.1.2-essentials_build'
 # gallery and the editor need. They are installed and checked as one unit so a
 # runtime can never end up with mismatched versions of the two.
 if ((Test-Path -LiteralPath $ffmpegPath) -and (Test-Path -LiteralPath $ffprobePath)) {
-    $ffmpegVersion = & $ffmpegPath -version 2>$null | Select-Object -First 1
-    $ffmpegOk = $LASTEXITCODE -eq 0 -and $ffmpegVersion -like 'ffmpeg version 8.1.2*'
-    $ffprobeVersion = & $ffprobePath -version 2>$null | Select-Object -First 1
-    $ffprobeOk = $LASTEXITCODE -eq 0 -and $ffprobeVersion -like 'ffprobe version 8.1.2*'
+    # The whole output is collected before the first line is picked out.
+    # Piping straight into `Select-Object -First 1` ends the pipeline as soon
+    # as it has its line, which kills the still-writing native process and
+    # leaves $LASTEXITCODE at 255. That is a race: ffmpeg usually finished in
+    # time, ffprobe usually did not, so this check reported "not ready" for a
+    # runtime that was perfectly fine and re-downloaded ~100 MB every build —
+    # and turned an upstream outage into a failed release.
+    $ffmpegOutput = & $ffmpegPath -version 2>$null
+    $ffmpegExit = $LASTEXITCODE
+    $ffmpegVersion = $ffmpegOutput | Select-Object -First 1
+    $ffmpegOk = $ffmpegExit -eq 0 -and $ffmpegVersion -like 'ffmpeg version 8.1.2*'
+    $ffprobeOutput = & $ffprobePath -version 2>$null
+    $ffprobeExit = $LASTEXITCODE
+    $ffprobeVersion = $ffprobeOutput | Select-Object -First 1
+    $ffprobeOk = $ffprobeExit -eq 0 -and $ffprobeVersion -like 'ffprobe version 8.1.2*'
     $ffmpegReady = $ffmpegOk -and $ffprobeOk
     if ($ffmpegReady -and $ffmpegVersion -like '*full_build*') {
         $ffmpegPackage = '8.1.2-full_build'
