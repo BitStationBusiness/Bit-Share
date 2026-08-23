@@ -43,9 +43,27 @@ String windowsLibraryDirectory() {
   );
 }
 
+/// Per-user directory holding a self-updated yt-dlp.
+///
+/// The bundled runtime sits beside the executable, which for an installed
+/// copy means Program Files — not writable without elevation. So the engine
+/// updater never touches it: a newer yt-dlp lands here and is simply
+/// preferred, which also means uninstalling the update is deleting a folder,
+/// and the version shipped in the installer is always still there.
+String windowsEngineOverrideDirectory() {
+  final base =
+      Platform.environment['LOCALAPPDATA'] ??
+      Platform.environment['USERPROFILE'] ??
+      Directory.current.path;
+  return joinPath(base, 'Bit-Share', 'engine');
+}
+
 /// Finds the bundled runtime, preferring the copy next to the running
-/// executable and falling back to the source tree during development. The
-/// result is cached because it cannot change while the app is running.
+/// executable and falling back to the source tree during development. A
+/// self-updated yt-dlp in [windowsEngineOverrideDirectory] wins over the
+/// bundled one. The result is cached because it cannot change while the app
+/// is running — a freshly downloaded engine takes effect on the next start,
+/// never underneath a running download.
 Future<WindowsRuntimePaths> resolveWindowsRuntime() async {
   final cached = _cached;
   if (cached != null) return cached;
@@ -62,8 +80,11 @@ Future<WindowsRuntimePaths> resolveWindowsRuntime() async {
     if (await ytDlp.exists() && await ffmpeg.exists()) {
       final deno = File(joinPath(directory, 'deno.exe'));
       final ffprobe = File(joinPath(directory, 'ffprobe.exe'));
+      final override = File(
+        joinPath(windowsEngineOverrideDirectory(), 'yt-dlp.exe'),
+      );
       return _cached = WindowsRuntimePaths(
-        ytDlp: ytDlp.path,
+        ytDlp: await override.exists() ? override.path : ytDlp.path,
         ffmpeg: ffmpeg.path,
         // A runtime prepared before ffprobe was bundled still downloads
         // fine; only the gallery's metadata probe degrades, so this resolves

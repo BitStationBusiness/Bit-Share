@@ -7,6 +7,7 @@ import '../../core/web_url.dart';
 import '../editor/editor_screen.dart';
 import '../gallery/gallery_screen.dart';
 import '../update/update_gate.dart';
+import 'ytdlp_engine_updater.dart';
 import '../gallery/media_library.dart';
 import 'windows_download_backend.dart';
 
@@ -40,6 +41,16 @@ class _WindowsDownloadScreenState extends State<WindowsDownloadScreen> {
   void dispose() {
     _urlController.dispose();
     super.dispose();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    // YouTube breaks yt-dlp far more often than Bit-Share ships an
+    // installer, so the engine refreshes itself. The updater throttles its
+    // own network use, and a newer engine takes effect on the next start
+    // rather than underneath a download that is already running.
+    unawaited(const YtDlpEngineUpdater().checkAndInstall());
   }
 
   @override

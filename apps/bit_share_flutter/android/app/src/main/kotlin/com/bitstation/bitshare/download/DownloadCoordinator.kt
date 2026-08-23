@@ -35,6 +35,38 @@ internal class DownloadCoordinator(
         Context.MODE_PRIVATE,
     )
 
+    init {
+        maybeUpdateEngine()
+    }
+
+    /// YouTube breaks yt-dlp far more often than Bit-Share ships a release,
+    /// so the engine refreshes itself between app updates. Throttled because
+    /// the answer changes at most daily and PyPI should not be polled on
+    /// every launch; a newly downloaded version takes effect on the next
+    /// start, never underneath a running download.
+    private fun maybeUpdateEngine() {
+        val now = System.currentTimeMillis()
+        val last = preferences.getLong(ENGINE_CHECK_KEY, 0L)
+        if (now - last < ENGINE_CHECK_INTERVAL_MS) return
+        executor.execute {
+            val summary = runCatching {
+                PythonYtDlpEngine.updateEngine(appContext)
+            }.getOrElse { "{\"status\":\"failed\"}" }
+            // Only a completed attempt resets the clock, so a device that is
+            // offline right now tries again on the next launch instead of
+            // waiting out the whole interval.
+            if ("\"failed\"" !in summary) {
+                preferences.edit().putLong(ENGINE_CHECK_KEY, now).apply()
+            }
+            if (
+                appContext.applicationInfo.flags and
+                ApplicationInfo.FLAG_DEBUGGABLE != 0
+            ) {
+                Log.d(LOG_TAG, "yt-dlp self-update: $summary")
+            }
+        }
+    }
+
     fun inspect(
         rawUrl: String,
         onSuccess: (Map<String, Any?>) -> Unit,
@@ -541,6 +573,8 @@ internal class DownloadCoordinator(
         const val LOG_TAG = "BitShareDownload"
         const val PREFERENCES_NAME = "bitshare_preferences"
         const val COMPLETED_DOWNLOADS_KEY = "completed_downloads"
+        const val ENGINE_CHECK_KEY = "engine_update_checked_at"
+        const val ENGINE_CHECK_INTERVAL_MS = 12 * 60 * 60 * 1000L
         const val STORAGE_SAFETY_BYTES = 16 * 1024 * 1024L
 
     }
