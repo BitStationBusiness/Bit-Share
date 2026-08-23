@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import '../../core/web_url.dart';
 import '../editor/editor_screen.dart';
 import '../gallery/gallery_screen.dart';
+import '../update/update_gate.dart';
 import '../gallery/media_library.dart';
 import 'windows_download_backend.dart';
 
@@ -100,6 +101,13 @@ class _WindowsDownloadScreenState extends State<WindowsDownloadScreen> {
                       icon: Icons.video_library_outlined,
                       tooltip: 'Galería: ver y editar lo descargado',
                       onPressed: () => unawaited(_openGallery()),
+                    ),
+                    _HeaderAction(
+                      key: const Key('windows-check-updates-button'),
+                      icon: Icons.system_update_alt_rounded,
+                      tooltip: 'Buscar actualizaciones de Bit-Share',
+                      onPressed: () =>
+                          unawaited(checkForUpdatesInteractively(context)),
                     ),
                     _HeaderAction(
                       icon: Icons.folder_open_outlined,

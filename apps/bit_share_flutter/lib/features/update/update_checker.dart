@@ -14,14 +14,17 @@ const _releasesUrl = 'https://api.github.com/repos/$_repo/releases?per_page=10';
 class UpdateChecker {
   const UpdateChecker();
 
-  /// Returns the newest published, non-draft, non-prerelease version when it
+  /// Looks for the newest published, non-draft, non-prerelease version that
   /// is newer than [kAppVersion] and carries an installer for this platform.
-  /// Returns null on any failure, on debug builds, or when already current —
-  /// the caller decides silence vs. surfacing an error, and today it always
-  /// stays silent, matching a check that should never interrupt startup.
-  Future<UpdateRelease?> checkForUpdate() async {
-    if (!kIsVersionedBuild) return null;
-    if (!Platform.isWindows && !Platform.isAndroid) return null;
+  ///
+  /// Every outcome is named rather than collapsed into null: the caller needs
+  /// to know whether a silent result meant "already current" (leave it) or
+  /// "the check never got an answer" (retry, and say so if the user asked).
+  Future<UpdateCheckResult> checkForUpdate() async {
+    if (!kIsVersionedBuild) return const UpdateCheckResult.unsupported();
+    if (!Platform.isWindows && !Platform.isAndroid) {
+      return const UpdateCheckResult.unsupported();
+    }
 
     final client = HttpClient();
     try {
@@ -36,11 +39,13 @@ class UpdateChecker {
       );
       if (response.statusCode != 200) {
         await response.drain<void>();
-        return null;
+        // Includes GitHub's 403 rate-limit answer, which a later attempt
+        // from the same address can well get past.
+        return const UpdateCheckResult.failed();
       }
       final body = await response.transform(utf8.decoder).join();
       final decoded = jsonDecode(body);
-      if (decoded is! List) return null;
+      if (decoded is! List) return const UpdateCheckResult.failed();
 
       Map<String, Object?>? latest;
       for (final entry in decoded) {
@@ -54,26 +59,33 @@ class UpdateChecker {
         latest = release;
         break;
       }
-      if (latest == null) return null;
+      if (latest == null) return const UpdateCheckResult.upToDate();
 
       final tag = latest['tag_name'] as String;
       final version = tag.startsWith(RegExp('[vV]')) ? tag.substring(1) : tag;
-      if (compareVersions(version, kAppVersion) <= 0) return null;
+      if (compareVersions(version, kAppVersion) <= 0) {
+        return const UpdateCheckResult.upToDate();
+      }
 
       final asset = _pickAsset(latest);
-      if (asset == null) return null;
+      // A newer tag with no installer for this platform is not something the
+      // user can act on, and no amount of retrying will produce one.
+      if (asset == null) return const UpdateCheckResult.upToDate();
       final assetName = asset['name'] as String? ?? '';
 
-      return UpdateRelease(
-        version: version,
-        tag: tag,
-        notes: (latest['body'] as String? ?? '').trim(),
-        downloadUrl: asset['browser_download_url'] as String,
-        assetSizeBytes: (asset['size'] as num?)?.toInt() ?? 0,
-        sha256: _extractSha256(latest['body'] as String?, assetName),
+      return UpdateCheckResult(
+        UpdateCheckStatus.updateAvailable,
+        UpdateRelease(
+          version: version,
+          tag: tag,
+          notes: (latest['body'] as String? ?? '').trim(),
+          downloadUrl: asset['browser_download_url'] as String,
+          assetSizeBytes: (asset['size'] as num?)?.toInt() ?? 0,
+          sha256: _extractSha256(latest['body'] as String?, assetName),
+        ),
       );
     } on Object {
-      return null;
+      return const UpdateCheckResult.failed();
     } finally {
       client.close(force: true);
     }

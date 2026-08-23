@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import '../../core/media_formatting.dart';
+import '../update/update_gate.dart';
 import 'media_library.dart';
 import 'player_screen.dart';
 
@@ -133,9 +134,16 @@ class _GalleryScreenState extends State<GalleryScreen> {
               ]
             : [
                 IconButton(
-                  tooltip: 'Actualizar',
+                  tooltip: 'Actualizar la lista',
                   onPressed: _refresh,
                   icon: const Icon(Icons.refresh_rounded),
+                ),
+                IconButton(
+                  key: const Key('gallery-check-updates-button'),
+                  tooltip: 'Buscar actualizaciones de Bit-Share',
+                  onPressed: () =>
+                      unawaited(checkForUpdatesInteractively(context)),
+                  icon: const Icon(Icons.system_update_alt_rounded),
                 ),
               ],
       ),
