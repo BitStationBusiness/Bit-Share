@@ -352,11 +352,12 @@ def _download_meta_story(
             )
 
         if mode == "audio":
-            final_path = os.path.join(directory, "Historia.m4a")
+            final_path = os.path.join(directory, "Historia.mp3")
             source = audio_tmp if audio_url else video_tmp
             _run_ffmpeg(
                 ffmpeg_location,
-                ["-i", source, "-vn", "-c:a", "aac", final_path],
+                ["-i", source, "-vn", "-c:a", "libmp3lame", "-q:a", "2",
+                 final_path],
             )
         else:
             final_path = os.path.join(directory, "Historia.mp4")
@@ -676,10 +677,15 @@ def download_media(
             )
 
         if mode == "audio":
+            # MP3, not the site's own container: an .m4a plays nowhere near
+            # as widely — car stereos, older speakers and plenty of desktop
+            # players simply skip it — and MP3 is what users asking for "the
+            # audio" expect to get. Quality 0 is LAME's best VBR setting.
             options["postprocessors"] = [
                 {
                     "key": "FFmpegExtractAudio",
-                    "preferredcodec": "m4a",
+                    "preferredcodec": "mp3",
+                    "preferredquality": "0",
                 }
             ]
         else:

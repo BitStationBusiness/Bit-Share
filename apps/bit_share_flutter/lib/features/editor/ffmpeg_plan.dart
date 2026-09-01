@@ -30,15 +30,17 @@ class FfmpegEditPlan {
   final Duration expectedDuration;
 }
 
-/// Extension the export will be written with. Audio keeps MP3 as MP3 so an
-/// edited track stays playable everywhere the original was; everything else
-/// lands in an MP4/M4A container.
+/// Extension the export will be written with: MP4 for video, MP3 for audio,
+/// whatever the source happened to be. Those are the two formats Bit-Share
+/// downloads in, and an edited copy has to open anywhere the original did —
+/// an M4A carried over from an older download plays in noticeably fewer
+/// places than the MP3 the same edit can produce for free.
 String editOutputExtension(MediaEditRequest request) {
-  if (request.source.kind == MediaKind.audio) {
-    return request.source.extension == 'mp3' ? 'mp3' : 'm4a';
-  }
-  return 'mp4';
+  return request.source.kind == MediaKind.audio ? 'mp3' : 'mp4';
 }
+
+/// Containers whose video track can be dropped into an MP4 untouched.
+const _mp4Containers = <String>{'mp4', 'm4v', 'mov', 'm4a'};
 
 /// Builds the ffmpeg command for [request].
 ///
@@ -116,11 +118,7 @@ FfmpegEditPlan buildFfmpegEditPlan({
     arguments.addAll(['-vn', '-map', '0:a:0']);
     final audioFilter = _audioFilter(request);
     if (audioFilter != null) arguments.addAll(['-af', audioFilter]);
-    if (editOutputExtension(request) == 'mp3') {
-      arguments.addAll(['-c:a', 'libmp3lame', '-q:a', '2']);
-    } else {
-      arguments.addAll(['-c:a', 'aac', '-b:a', '192k']);
-    }
+    arguments.addAll(['-c:a', 'libmp3lame', '-q:a', '2']);
   }
 
   arguments.add(outputPath);
@@ -135,13 +133,19 @@ FfmpegEditPlan buildFfmpegEditPlan({
 
 /// Muting on its own touches no frames, so the video track can be copied
 /// verbatim. Any other change needs a real encode.
+///
+/// The container check is not cosmetic: a VP9 or AV1 track lifted out of a
+/// .webm has no MP4 tag, and `-c:v copy` into an .mp4 fails outright with
+/// "codec not currently supported in container". Re-encoding costs time;
+/// stream copying there costs the export.
 bool _canStreamCopy(MediaEditRequest request) {
   return request.mute &&
       !request.isTrimmed &&
       !request.isRotated &&
       !request.isSpeedAdjusted &&
       !request.isVolumeAdjusted &&
-      !request.isRescaled;
+      !request.isRescaled &&
+      _mp4Containers.contains(request.source.extension);
 }
 
 /// Joins audio transforms in one chain. This matters for a clip where the

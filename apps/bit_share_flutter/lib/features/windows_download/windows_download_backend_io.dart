@@ -368,17 +368,29 @@ Get-CimInstance Win32_Process |
     await _ensureStorage(estimatedBytes, mode);
     final cookieArguments = await _cookieArguments(browserSession);
 
-    // The same rendition is published twice by several sites — once as a
-    // plain https file and once as an HLS playlist — and yt-dlp's own
-    // ordering can land on the HLS copy, which downloads fragment by
-    // fragment for identical picture. Asking for the direct file first
-    // keeps downloads fast; the HLS copy still serves as the fallback.
+    // Two orderings are being imposed here, and both matter.
+    //
+    // Codec first: H.264 video with AAC audio, not merely "something in an
+    // .mp4 file". YouTube publishes every clip as AV1 and VP9 as well, and
+    // yt-dlp's own ordering prefers those — the result is a file named .mp4
+    // that Windows Media Player refuses to open without a store codec pack.
+    //
+    // Then protocol: the same rendition is published twice by several sites,
+    // once as a plain https file and once as an HLS playlist, and the HLS
+    // copy downloads fragment by fragment for identical picture. Asking for
+    // the direct file first keeps downloads fast; HLS remains the fallback.
     final limit = height == null ? '' : '[height<=$height]';
     final format = mode == WindowsDownloadMode.audio
         ? null
-        : 'bestvideo*$limit[protocol^=http]+bestaudio[protocol^=http]/'
+        : 'bestvideo*$limit[vcodec^=avc1][protocol^=http]'
+              '+bestaudio[acodec^=mp4a][protocol^=http]/'
+              'bestvideo*$limit[vcodec^=avc1]+bestaudio[acodec^=mp4a]/'
+              'bestvideo*$limit[ext=mp4][protocol^=http]'
+              '+bestaudio[ext=m4a][protocol^=http]/'
+              'bestvideo*$limit[protocol^=http]+bestaudio[protocol^=http]/'
+              'bestvideo*$limit[ext=mp4]+bestaudio[ext=m4a]/'
               'bestvideo*$limit+bestaudio/'
-              'best$limit';
+              'best$limit[ext=mp4]/best$limit';
     final outputTemplate = joinPath(
       _outputDirectory,
       '%(title).180B [%(id)s].%(ext)s',
@@ -458,24 +470,31 @@ Get-CimInstance Win32_Process |
         throw _failureFor(errors.toString());
       }
 
-      final resolvedPaths = resultPaths
+      final rawPaths = resultPaths
           .map(_safeResultPath)
           .whereType<String>()
           .toList(growable: false);
-      final resolvedPath = resolvedPaths.isNotEmpty
-          ? resolvedPaths.first
-          : await _newestOutputCreatedAfter(output, startedAt);
-      if (resolvedPath == null) {
+      final fallbackPath = rawPaths.isEmpty
+          ? await _newestOutputCreatedAfter(output, startedAt)
+          : null;
+      if (rawPaths.isEmpty && fallbackPath == null) {
         throw const WindowsDownloadException(
           'La descarga terminó, pero no se encontró el archivo final.',
         );
       }
       onProgress(
+        const WindowsDownloadProgress(percent: 100, stage: 'processing'),
+      );
+      final resolvedPaths = <String>[
+        for (final path in rawPaths.isEmpty ? [fallbackPath!] : rawPaths)
+          await _normalizeContainer(path, runtime, mode),
+      ];
+      onProgress(
         const WindowsDownloadProgress(percent: 100, stage: 'completed'),
       );
       return WindowsDownloadResult(
-        filePath: resolvedPath,
-        fileCount: resolvedPaths.isEmpty ? 1 : resolvedPaths.length,
+        filePath: resolvedPaths.first,
+        fileCount: resolvedPaths.length,
       );
     } finally {
       if (identical(_activeProcess, process)) _activeProcess = null;
@@ -613,6 +632,78 @@ Get-CimInstance Win32_Process |
     throw WindowsDownloadException(
       'No se encontró ${browserSession.label} en este equipo.',
     );
+  }
+
+  /// Guarantees the extension Bit-Share promises: MP4 for video, MP3 for
+  /// audio.
+  ///
+  /// `--merge-output-format` and `--extract-audio` already target those, but
+  /// neither runs when a site serves a single progressive rendition that
+  /// needs no merging — a WebM-only host would otherwise drop a .webm
+  /// straight into the gallery. Remuxing is a container swap with no
+  /// re-encode (a second or two even for a long clip); only codecs that
+  /// genuinely cannot live in MP4 fall through to a real encode. A
+  /// conversion that fails outright returns the original path rather than
+  /// costing the user a download that already succeeded.
+  Future<String> _normalizeContainer(
+    String path,
+    WindowsRuntimePaths runtime,
+    WindowsDownloadMode mode,
+  ) async {
+    final target = mode == WindowsDownloadMode.audio ? 'mp3' : 'mp4';
+    final dot = path.lastIndexOf('.');
+    final extension = dot < 0 ? '' : path.substring(dot + 1).toLowerCase();
+    if (extension == target) return path;
+
+    final output = '${dot < 0 ? path : path.substring(0, dot)}.$target';
+    final attempts = mode == WindowsDownloadMode.audio
+        ? [
+            ['-i', path, '-vn', '-c:a', 'libmp3lame', '-q:a', '2', output],
+          ]
+        : [
+            ['-i', path, '-c', 'copy', '-movflags', '+faststart', output],
+            [
+              '-i', path,
+              '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23',
+              '-pix_fmt', 'yuv420p',
+              '-c:a', 'aac', '-b:a', '160k',
+              '-movflags', '+faststart',
+              output,
+            ],
+          ];
+
+    for (final arguments in attempts) {
+      try {
+        final result = await Process.run(runtime.ffmpeg, [
+          '-hide_banner',
+          '-loglevel',
+          'error',
+          '-y',
+          ...arguments,
+        ], stdoutEncoding: utf8, stderrEncoding: utf8);
+        final converted = File(output);
+        if (result.exitCode == 0 &&
+            await converted.exists() &&
+            await converted.length() > 0) {
+          try {
+            await File(path).delete();
+          } on FileSystemException {
+            // The source is locked by a preview or virus scanner; leaving a
+            // duplicate behind beats failing a finished download.
+          }
+          return output;
+        }
+      } on ProcessException {
+        break;
+      }
+    }
+    try {
+      final leftover = File(output);
+      if (await leftover.exists()) await leftover.delete();
+    } on FileSystemException {
+      // Nothing to clean up.
+    }
+    return path;
   }
 
   List<String> _commonArguments(WindowsRuntimePaths runtime) {

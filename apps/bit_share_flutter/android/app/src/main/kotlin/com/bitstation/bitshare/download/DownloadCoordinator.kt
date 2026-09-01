@@ -360,7 +360,7 @@ internal class DownloadCoordinator(
                 ?: error("El motor terminó sin producir un archivo.")
 
             emitProgress(taskId, 100f, 0L, "publishing", providerName)
-            val published = mediaStore.publish(resultFile)
+            val published = mediaStore.publish(normalizeContainer(resultFile, mode))
             results[taskId] = published
             val previousCount = preferences.getInt(COMPLETED_DOWNLOADS_KEY, 0)
             val completedDownloadCount =
@@ -443,7 +443,15 @@ internal class DownloadCoordinator(
     // the same picture, so it is only reached once nothing else matches.
     private fun videoFormatSelector(height: Int?): String {
         val limit = height?.takeIf { it > 0 }?.let { "[height<=$it]" }.orEmpty()
-        return "bestvideo$limit[ext=mp4][protocol^=http]" +
+        // H.264 + AAC first, not merely "an .mp4 file". YouTube publishes the
+        // same clip as AV1 and VP9 too, and yt-dlp's own ordering prefers
+        // those: the result is a file named .mp4 that Windows Media Player,
+        // WhatsApp and most TVs refuse to open. avc1/mp4a is the pair every
+        // player has decoded for fifteen years.
+        return "bestvideo$limit[vcodec^=avc1][protocol^=http]" +
+            "+bestaudio[acodec^=mp4a][protocol^=http]/" +
+            "bestvideo$limit[vcodec^=avc1]+bestaudio[acodec^=mp4a]/" +
+            "bestvideo$limit[ext=mp4][protocol^=http]" +
             "+bestaudio[ext=m4a][protocol^=http]/" +
             "bestvideo$limit[protocol^=http]+bestaudio[protocol^=http]/" +
             "bestvideo$limit[ext=mp4]+bestaudio[ext=m4a]/" +
@@ -459,6 +467,61 @@ internal class DownloadCoordinator(
 
     private fun prepareFfmpegTools(): String {
         return FfmpegTools.prepare(appContext).absolutePath
+    }
+
+    /**
+     * Guarantees the extension Bit-Share promises: MP4 for video, MP3 for
+     * audio.
+     *
+     * yt-dlp's own merge and audio-extraction steps already target those, but
+     * neither runs when a site serves one progressive rendition that needs no
+     * merging — a WebM-only host would otherwise put a .webm straight in the
+     * gallery. Remuxing is a container swap with no re-encode; only when the
+     * codecs genuinely cannot live in MP4 does this fall back to a real
+     * encode, and a conversion that fails outright leaves the original file
+     * untouched rather than costing the user the download.
+     */
+    private fun normalizeContainer(file: File, mode: String): File {
+        val target = if (mode == "audio") "mp3" else "mp4"
+        if (file.extension.equals(target, ignoreCase = true)) return file
+        val output = File(file.parentFile, "${file.nameWithoutExtension}.$target")
+        val attempts = if (mode == "audio") {
+            listOf(
+                listOf(
+                    "-i", file.absolutePath,
+                    "-vn", "-c:a", "libmp3lame", "-q:a", "2",
+                    output.absolutePath,
+                ),
+            )
+        } else {
+            listOf(
+                listOf(
+                    "-i", file.absolutePath,
+                    "-c", "copy", "-movflags", "+faststart",
+                    output.absolutePath,
+                ),
+                listOf(
+                    "-i", file.absolutePath,
+                    "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
+                    "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k",
+                    "-movflags", "+faststart",
+                    output.absolutePath,
+                ),
+            )
+        }
+        for (arguments in attempts) {
+            output.delete()
+            val ran = FfmpegTools.run(
+                appContext,
+                listOf("-hide_banner", "-loglevel", "error", "-y") + arguments,
+            )
+            if (ran.isSuccess && output.isFile && output.length() > 0L) {
+                file.delete()
+                return output
+            }
+        }
+        output.delete()
+        return file
     }
 
     private fun String?.isUsableCodec(): Boolean {
