@@ -1172,6 +1172,15 @@ class _EditorScreenState extends State<EditorScreen> {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text(error.message)));
+    } on Object catch (error) {
+      // Anything the platform throws that is not a MediaEditException used to
+      // escape here and leave the button stuck on "Exportando…" forever, with
+      // no message and no way back. Whatever it is, the export is over.
+      if (!mounted) return;
+      setState(() => _exporting = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No se pudo guardar la copia editada: $error')),
+      );
     }
   }
 }

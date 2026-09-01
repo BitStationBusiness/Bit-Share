@@ -47,14 +47,32 @@ class WindowsMediaEditor implements MediaEditor {
     }
 
     final extension = editOutputExtension(request);
-    final output = await _uniqueOutputPath(request.source, extension);
+    final String output;
+    try {
+      output = await _uniqueOutputPath(request.source, extension);
+    } on FileSystemException catch (error) {
+      throw MediaEditException(
+        'No se pudo preparar la carpeta de Bit-Share: '
+        '${error.osError?.message ?? 'acceso denegado'}.',
+      );
+    }
     final plan = buildFfmpegEditPlan(
       request: request,
       inputPath: request.source.uri,
       outputPath: output,
     );
 
-    final process = await Process.start(runtime.ffmpeg, plan.arguments);
+    final Process process;
+    try {
+      process = await Process.start(runtime.ffmpeg, plan.arguments);
+    } on ProcessException catch (error) {
+      // A missing or blocked ffmpeg.exe used to escape as a raw
+      // ProcessException, which the editor screen had no branch for: the
+      // save button simply stayed spinning with nothing said.
+      throw MediaEditException(
+        'No se pudo iniciar el motor multimedia: ${error.message}',
+      );
+    }
     _activeProcess = process;
 
     final errors = StringBuffer();
@@ -183,12 +201,23 @@ class WindowsMediaEditor implements MediaEditor {
     if (error.contains('no space left')) {
       return 'No hay espacio suficiente para guardar el archivo editado.';
     }
-    if (error.contains('permission denied') || error.contains('access is denied')) {
+    if (error.contains('permission denied') ||
+        error.contains('access is denied')) {
       return 'Windows no permitió escribir en la carpeta de Bit-Share.';
     }
-    if (error.contains('invalid data') || error.contains('moov atom not found')) {
+    if (error.contains('invalid data') ||
+        error.contains('moov atom not found')) {
       return 'El archivo original está dañado y no se puede editar.';
     }
-    return 'No se pudo procesar la edición.';
+    if (error.contains('codec not currently supported in container')) {
+      return 'El formato del archivo original no es compatible con MP4.';
+    }
+    // Anything unrecognised keeps ffmpeg's own last words. A user reporting
+    // "no se pudo procesar la edición" gives nothing to act on; the real
+    // line does, and it is the only copy of it that exists.
+    final detail = rawError.trim();
+    if (detail.isEmpty) return 'No se pudo procesar la edición.';
+    return 'No se pudo procesar la edición: '
+        '${detail.substring(detail.length > 180 ? detail.length - 180 : 0)}';
   }
 }

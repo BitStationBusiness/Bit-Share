@@ -573,11 +573,11 @@ class GalleryPlugin :
         val baseName = displayName.substringBeforeLast('.', displayName)
         val sourceExtension = displayName.substringAfterLast('.', "")
         val originalExtension = sourceExtension.ifBlank { if (isVideo) "mp4" else "m4a" }
-        val outputExtension = when {
-            !isVideo && originalExtension.equals("mp3", ignoreCase = true) -> "mp3"
-            !isVideo -> "m4a"
-            else -> "mp4"
-        }
+        // Bit-Share only ever hands back MP4 video and MP3 audio, whatever
+        // the source happened to be. An edited clip has to open on the same
+        // players the original did, and those two are the pair every phone,
+        // desktop and messaging app plays without a codec pack.
+        val outputExtension = if (isVideo) "mp4" else "mp3"
 
         val inputFile = File(workDir, "input-${System.nanoTime()}.$originalExtension")
         val outputFile = uniqueOutputFile(workDir, baseName, outputExtension)
@@ -586,9 +586,6 @@ class GalleryPlugin :
             context.contentResolver.openInputStream(uri)?.use { input ->
                 FileOutputStream(inputFile).use { output -> input.copyTo(output) }
             } ?: throw IllegalStateException("No se pudo leer el archivo original.")
-
-            val tools = FfmpegTools.prepare(context)
-            val ffmpeg = File(tools, "ffmpeg").absolutePath
 
             val plan = buildExportPlan(
                 inputPath = inputFile.absolutePath,
@@ -605,12 +602,31 @@ class GalleryPlugin :
                 width = width,
                 height = height,
                 outputExtension = outputExtension,
+                sourceExtension = originalExtension,
             )
 
-            val process = ProcessBuilder(listOf(ffmpeg) + plan.arguments)
-                .redirectErrorStream(false)
-                .start()
+            // ffmpeg here is `libffmpeg.so`, a dynamically linked executable
+            // whose libav* dependencies ship inside youtubedl-android's
+            // package archives. FfmpegTools.start unpacks them and puts them
+            // on LD_LIBRARY_PATH; a bare ProcessBuilder cannot, and the
+            // process would die before reading its first argument.
+            val process = FfmpegTools.start(context, plan.arguments)
             activeExport = process
+
+            // stderr has to be drained on its own thread. Left unread, a
+            // filled pipe buffer blocks ffmpeg mid-encode; read afterwards,
+            // the reason a failed export failed is already gone.
+            val diagnostics = StringBuilder()
+            val stderrDrain = Thread {
+                BufferedReader(InputStreamReader(process.errorStream)).use { reader ->
+                    reader.forEachLine { line ->
+                        if (diagnostics.length < 8192) diagnostics.appendLine(line)
+                    }
+                }
+            }.apply {
+                isDaemon = true
+                start()
+            }
 
             BufferedReader(InputStreamReader(process.inputStream)).use { reader ->
                 var line: String?
@@ -625,6 +641,7 @@ class GalleryPlugin :
                 }
             }
             val exitCode = process.waitFor()
+            stderrDrain.join(2_000)
             activeExport = null
 
             if (exportCancelled.get()) {
@@ -634,9 +651,8 @@ class GalleryPlugin :
             }
             if (exitCode != 0 || !outputFile.isFile || outputFile.length() == 0L) {
                 outputFile.delete()
-                mainHandler.post {
-                    result.error("export_failed", "No se pudo procesar la edición.", null)
-                }
+                val reason = friendlyExportFailure(diagnostics.toString())
+                mainHandler.post { result.error("export_failed", reason, null) }
                 return
             }
 
@@ -692,6 +708,7 @@ class GalleryPlugin :
         width: Int?,
         height: Int?,
         outputExtension: String,
+        sourceExtension: String,
     ): ExportPlan {
         val clampedStart = startMs.coerceAtLeast(0L)
         val clampedEnd = if (endMs > clampedStart) endMs else sourceDurationMs
@@ -707,8 +724,14 @@ class GalleryPlugin :
         val isVolumeAdjusted = volume != 1.0
         val scaled = scaledSize(width, height, longestSide)
         val isRescaled = scaled != null
+        // Copying the video track verbatim is only safe when it already
+        // lives in an MP4-family container: a VP9 or AV1 track pulled out of
+        // a .webm has no MP4 tag, and `-c:v copy` fails outright with
+        // "codec not currently supported in container". Re-encoding is
+        // slower but always produces a file.
         val streamCopy = isVideo && mute && !isTrimmed && !isRotated &&
-            !isSpeedAdjusted && !isVolumeAdjusted && !isRescaled
+            !isSpeedAdjusted && !isVolumeAdjusted && !isRescaled &&
+            sourceExtension.lowercase() in MP4_CONTAINERS
 
         val arguments = mutableListOf(
             "-hide_banner", "-nostdin", "-loglevel", "error", "-y",
@@ -856,6 +879,29 @@ class GalleryPlugin :
         return cleaned.ifBlank { "Bit-Share" }
     }
 
+    /** Turns ffmpeg's own stderr into something a user can act on, while
+     * keeping the raw tail for the cases none of the patterns match. */
+    private fun friendlyExportFailure(rawError: String): String {
+        val error = rawError.lowercase()
+        return when {
+            error.isBlank() -> "No se pudo procesar la edición."
+            "cannot link executable" in error ||
+                ("library" in error && "not found" in error) ->
+                "El motor multimedia no se pudo iniciar. Reinicia Bit-Share " +
+                    "e inténtalo de nuevo."
+            "no space left" in error ->
+                "No hay espacio suficiente para guardar el archivo editado."
+            "permission denied" in error ->
+                "Android no permitió escribir el archivo editado."
+            "invalid data" in error || "moov atom not found" in error ->
+                "El archivo original está dañado y no se puede editar."
+            "codec not currently supported in container" in error ->
+                "El formato del archivo original no es compatible con MP4."
+            else -> "No se pudo procesar la edición: " +
+                rawError.trim().takeLast(180)
+        }
+    }
+
     private fun mimeTypeForExtension(extension: String): String? {
         return MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension.lowercase())
     }
@@ -870,5 +916,6 @@ class GalleryPlugin :
         const val METHODS_CHANNEL = "bitshare/gallery"
         const val EVENTS_CHANNEL = "bitshare/gallery/events"
         val TIMESTAMP_PATTERN = Regex("""^(\d+):([0-5]?\d):([0-5]?\d)(?:\.(\d+))?$""")
+        val MP4_CONTAINERS = setOf("mp4", "m4v", "mov", "m4a")
     }
 }
